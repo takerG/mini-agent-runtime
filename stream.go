@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 type flusher interface {
@@ -36,6 +37,11 @@ type chatRequest struct {
 	// 如果为 false，服务端通常会等完整答案生成完再一次性返回；
 	// 如果为 true，服务端会边生成边返回多行 JSON，客户端就可以边读边输出。
 	Stream bool `json:"stream"`
+
+	// Think 是 Ollama 针对部分思考模型的开关，例如 qwen3。
+	// nil 表示不发送该字段，交给模型默认行为；
+	// false 表示关闭 thinking 流，让模型更快输出 message.content。
+	Think *bool `json:"think,omitempty"`
 }
 
 type chatResponse struct {
@@ -59,19 +65,33 @@ func NewChatRequest(endpoint string, model string, userMessage string) (*http.Re
 	return NewChatRequestWithContext(context.Background(), endpoint, model, userMessage)
 }
 
+func NewChatRequestWithMessages(endpoint string, model string, messages []chatMessage) (*http.Request, error) {
+	return NewChatRequestWithMessagesAndContext(context.Background(), endpoint, model, messages)
+}
+
 func NewChatRequestWithContext(ctx context.Context, endpoint string, model string, userMessage string) (*http.Request, error) {
+	return NewChatRequestWithMessagesAndContext(ctx, endpoint, model, []chatMessage{
+		{Role: "user", Content: userMessage},
+	})
+}
+
+func NewChatRequestWithMessagesAndContext(ctx context.Context, endpoint string, model string, messages []chatMessage) (*http.Request, error) {
+	return NewChatRequestWithMessagesThinkAndContext(ctx, endpoint, model, messages, nil)
+}
+
+func NewChatRequestWithMessagesThinkAndContext(ctx context.Context, endpoint string, model string, messages []chatMessage, think *bool) (*http.Request, error) {
 	// 这里把用户的一句话包装成 Ollama chat API 需要的 JSON 结构。
 	// 未来做 agent 时，可以在 Messages 里加入：
 	//   1. system prompt
 	//   2. 历史对话
 	//   3. 工具调用结果
-	// 但第一版先保持最小，只放当前用户输入。
+	// 第二版开始，CLI 会把历史 user/assistant 消息都放进 Messages，
+	// 让本地模型能看到上下文，从而支持多轮对话。
 	payload := chatRequest{
-		Model: model,
-		Messages: []chatMessage{
-			{Role: "user", Content: userMessage},
-		},
-		Stream: true,
+		Model:    model,
+		Messages: append([]chatMessage(nil), messages...),
+		Stream:   true,
+		Think:    think,
 	}
 
 	// 用 json.Encoder 写入 bytes.Buffer，比手写字符串安全：
@@ -95,6 +115,13 @@ func NewChatRequestWithContext(ctx context.Context, endpoint string, model strin
 }
 
 func StreamChatContent(r io.Reader, w io.Writer) error {
+	_, err := StreamChatContentAndCapture(r, w)
+	return err
+}
+
+func StreamChatContentAndCapture(r io.Reader, w io.Writer) (string, error) {
+	var captured strings.Builder
+
 	// Ollama 的 stream=true 响应是“newline-delimited JSON”：
 	// 每一行都是一个完整 JSON 对象，行与行之间用 \n 分隔。
 	// bufio.Scanner 很适合处理这种“按行读取”的协议。
@@ -111,10 +138,10 @@ func StreamChatContent(r io.Reader, w io.Writer) error {
 		// 这一步就是“流式接收”：不等待完整回答，只处理当前刚到的一小块。
 		var response chatResponse
 		if err := json.Unmarshal(line, &response); err != nil {
-			return fmt.Errorf("decode chat response: %w", err)
+			return captured.String(), fmt.Errorf("decode chat response: %w", err)
 		}
 		if response.Error != "" {
-			return fmt.Errorf("chat response error: %s", response.Error)
+			return captured.String(), fmt.Errorf("chat response error: %s", response.Error)
 		}
 
 		// 结束行可能只有 {"done":true}，没有 content。
@@ -127,8 +154,9 @@ func StreamChatContent(r io.Reader, w io.Writer) error {
 		// 对 CLI 来说，w 是 os.Stdout；
 		// 对 HTTP 代理来说，w 是 http.ResponseWriter。
 		if _, err := io.WriteString(w, response.Message.Content); err != nil {
-			return fmt.Errorf("write chat content: %w", err)
+			return captured.String(), fmt.Errorf("write chat content: %w", err)
 		}
+		captured.WriteString(response.Message.Content)
 
 		// 关键点：写完一个 content chunk 就立即 Flush。
 		// 很多 writer/HTTP server 会为了效率先把数据放在缓冲区里；
@@ -144,7 +172,7 @@ func StreamChatContent(r io.Reader, w io.Writer) error {
 	//   2. 读取过程中出错，例如网络断开
 	// scanner.Err() 用来区分这两种情况。
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("read chat response: %w", err)
+		return captured.String(), fmt.Errorf("read chat response: %w", err)
 	}
-	return nil
+	return captured.String(), nil
 }

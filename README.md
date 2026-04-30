@@ -1,19 +1,21 @@
 # mini-agent-runtime
 
-A minimal Go CLI for streaming one chat message from a local Ollama-compatible model API.
+A minimal Go CLI for streaming multi-turn chat from a local Ollama-compatible model API.
 
 ## Usage
 
-Run with a message as command arguments:
-
-```powershell
-go run . -model llama3.2 "介绍一下你自己"
-```
-
-Or type one line after launch:
+Start an interactive multi-turn chat:
 
 ```powershell
 go run . -model llama3.2
+```
+
+Then type one message per line. Use `/exit`, `/quit`, `exit`, or `quit` to leave.
+
+You can also pass the first message as command arguments. After the first response, the CLI continues reading follow-up messages:
+
+```powershell
+go run . -model llama3.2 "介绍一下你自己"
 ```
 
 Defaults:

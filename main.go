@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -18,7 +16,7 @@ const (
 
 	// 默认模型名只是一个示例。不同电脑上安装的模型可能不同，
 	// 所以 main 函数里也提供了 -model 参数和 LOCAL_MODEL_NAME 环境变量。
-	defaultModel = "llama3.2"
+	defaultModel = "qwen3:4b"
 )
 
 func main() {
@@ -42,68 +40,12 @@ func main() {
 		return
 	}
 
-	// 不启动 HTTP 服务时，程序就是一个最小 CLI：
-	// 用户可以把一句话直接写在命令后面，也可以运行后再从 stdin 输入一行。
-	userMessage, err := readUserMessage(flag.Args(), os.Stdin)
-	if err != nil {
+	// 不启动 HTTP 服务时，程序进入多轮 CLI 对话模式。
+	// flag.Args() 如果有内容，会作为第一轮用户输入；第一轮结束后继续读取 stdin，
+	// 直到用户输入 /exit、/quit、exit、quit，或 stdin 到达 EOF。
+	if err := RunChatLoop(*endpoint, *model, http.DefaultClient, flag.Args(), os.Stdin, os.Stdout, os.Stderr); err != nil {
 		exitWithError(err)
 	}
-
-	// 构造发给本地模型的 HTTP 请求。这里不会一次性等模型完整回答，
-	// 请求体里会设置 stream=true，让模型服务按流式响应逐段返回。
-	req, err := NewChatRequest(*endpoint, *model, userMessage)
-	if err != nil {
-		exitWithError(err)
-	}
-
-	// 发送 HTTP 请求后，resp.Body 是一个流。
-	// 只要服务端还在生成内容，这个 Body 就可能不断读到新的 JSON 行。
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		exitWithError(fmt.Errorf("post chat request: %w", err))
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		exitWithError(fmt.Errorf("chat request failed: %s", resp.Status))
-	}
-
-	// 核心流式处理：
-	// StreamChatContent 会从 resp.Body 一行一行读取模型响应，
-	// 每读到 response.message.content 就立即写到 os.Stdout。
-	// 这就是“流式接收模型响应，同时流式对外输出”的 CLI 版本。
-	if err := StreamChatContent(resp.Body, os.Stdout); err != nil {
-		exitWithError(err)
-	}
-	fmt.Fprintln(os.Stdout)
-}
-
-func readUserMessage(args []string, stdin io.Reader) (string, error) {
-	// 优先使用命令行参数，这样可以：
-	//   go run . "你好"
-	// 如果用户传了多个单词，strings.Join 会把它们拼成一句话。
-	if len(args) > 0 {
-		message := strings.TrimSpace(strings.Join(args, " "))
-		if message != "" {
-			return message, nil
-		}
-	}
-
-	// 如果命令行没有给消息，就提示用户输入一行。
-	// Scanner 默认按行读取，因此用户按回车后，这一轮输入就结束。
-	fmt.Fprint(os.Stderr, "You: ")
-	scanner := bufio.NewScanner(stdin)
-	if scanner.Scan() {
-		message := strings.TrimSpace(scanner.Text())
-		if message == "" {
-			return "", fmt.Errorf("empty message")
-		}
-		return message, nil
-	}
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("read message: %w", err)
-	}
-	return "", fmt.Errorf("no message provided")
 }
 
 func getenvDefault(name string, fallback string) string {

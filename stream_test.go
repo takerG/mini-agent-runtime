@@ -54,6 +54,30 @@ func TestStreamChatContentFlushesAfterEachMessageContentChunk(t *testing.T) {
 	}
 }
 
+func TestStreamChatContentAndCaptureReturnsFullAssistantMessage(t *testing.T) {
+	input := strings.NewReader(
+		`{"message":{"content":"hello"}}` + "\n" +
+			`{"message":{"content":" again"}}` + "\n" +
+			`{"done":true}` + "\n",
+	)
+	var output flushingBuffer
+
+	got, err := StreamChatContentAndCapture(input, &output)
+	if err != nil {
+		t.Fatalf("StreamChatContentAndCapture returned error: %v", err)
+	}
+
+	if want := "hello again"; got != want {
+		t.Fatalf("captured = %q, want %q", got, want)
+	}
+	if got, want := output.String(), "hello again"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+	if got, want := output.flushes, 2; got != want {
+		t.Fatalf("flushes = %d, want %d", got, want)
+	}
+}
+
 func TestStreamChatContentReturnsDecodeErrorForInvalidJSON(t *testing.T) {
 	input := strings.NewReader(`{"message":`)
 	var output bytes.Buffer
@@ -61,6 +85,32 @@ func TestStreamChatContentReturnsDecodeErrorForInvalidJSON(t *testing.T) {
 	err := StreamChatContent(input, &output)
 	if err == nil {
 		t.Fatal("StreamChatContent returned nil error, want decode error")
+	}
+}
+
+func TestNewChatRequestWithMessagesBuildsConversationHistoryPayload(t *testing.T) {
+	messages := []chatMessage{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "hi"},
+		{Role: "user", Content: "what did I say?"},
+	}
+
+	req, err := NewChatRequestWithMessages("http://localhost:11434/api/chat", "llama3.2", messages)
+	if err != nil {
+		t.Fatalf("NewChatRequestWithMessages returned error: %v", err)
+	}
+
+	var body chatRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
+	if got, want := len(body.Messages), 3; got != want {
+		t.Fatalf("message count = %d, want %d", got, want)
+	}
+	for i, want := range messages {
+		if body.Messages[i] != want {
+			t.Fatalf("message[%d] = %#v, want %#v", i, body.Messages[i], want)
+		}
 	}
 }
 
@@ -98,25 +148,5 @@ func TestNewChatRequestBuildsStreamingChatPayload(t *testing.T) {
 	}
 	if got, want := body.Messages[0].Content, "say hi"; got != want {
 		t.Fatalf("message content = %q, want %q", got, want)
-	}
-}
-
-func TestReadUserMessagePrefersArgs(t *testing.T) {
-	got, err := readUserMessage([]string{"hello", "local", "model"}, strings.NewReader("ignored\n"))
-	if err != nil {
-		t.Fatalf("readUserMessage returned error: %v", err)
-	}
-	if want := "hello local model"; got != want {
-		t.Fatalf("message = %q, want %q", got, want)
-	}
-}
-
-func TestReadUserMessageReadsOneLineFromStdin(t *testing.T) {
-	got, err := readUserMessage(nil, strings.NewReader("hello from stdin\nsecond line\n"))
-	if err != nil {
-		t.Fatalf("readUserMessage returned error: %v", err)
-	}
-	if want := "hello from stdin"; got != want {
-		t.Fatalf("message = %q, want %q", got, want)
 	}
 }
