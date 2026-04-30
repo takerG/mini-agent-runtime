@@ -25,6 +25,7 @@ func main() {
 	// 这样第一版虽然很小，但已经具备后续扩展 agent runtime 的基本入口。
 	endpoint := flag.String("url", getenvDefault("LOCAL_MODEL_CHAT_URL", defaultEndpoint), "chat API URL")
 	model := flag.String("model", getenvDefault("LOCAL_MODEL_NAME", defaultModel), "local model name")
+	think := flag.Bool("think", true, "hide model thinking output when true; show it when false")
 	serveAddr := flag.String("serve", "", "serve a streaming HTTP proxy on this address, for example 127.0.0.1:8080")
 	flag.Parse()
 
@@ -43,7 +44,7 @@ func main() {
 	// 不启动 HTTP 服务时，程序进入多轮 CLI 对话模式。
 	// flag.Args() 如果有内容，会作为第一轮用户输入；第一轮结束后继续读取 stdin，
 	// 直到用户输入 /exit、/quit、exit、quit，或 stdin 到达 EOF。
-	if err := RunChatLoop(*endpoint, *model, http.DefaultClient, flag.Args(), os.Stdin, os.Stdout, os.Stderr); err != nil {
+	if err := RunChatLoop(*endpoint, *model, *think, http.DefaultClient, flag.Args(), os.Stdin, os.Stdout, os.Stderr); err != nil {
 		exitWithError(err)
 	}
 }

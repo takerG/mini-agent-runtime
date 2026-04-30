@@ -38,9 +38,10 @@ type chatRequest struct {
 	// 如果为 true，服务端会边生成边返回多行 JSON，客户端就可以边读边输出。
 	Stream bool `json:"stream"`
 
-	// Think 是 Ollama 针对部分思考模型的开关，例如 qwen3。
-	// nil 表示不发送该字段，交给模型默认行为；
-	// false 表示关闭 thinking 流，让模型更快输出 message.content。
+	// Think 是 Ollama 针对部分思考模型的输出控制，例如 qwen3。
+	// 按当前实测行为：
+	//   true  表示隐藏 think 流，只输出最终回答相关内容；
+	//   false 表示显示 think 流，便于观察模型推理过程。
 	Think *bool `json:"think,omitempty"`
 }
 

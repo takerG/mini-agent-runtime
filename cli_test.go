@@ -40,6 +40,7 @@ func TestRunChatLoopSendsConversationHistoryAcrossTurns(t *testing.T) {
 	err := RunChatLoop(
 		"http://localhost:11434/api/chat",
 		"llama3.2",
+		true,
 		client,
 		nil,
 		strings.NewReader("first\nsecond\n/exit\n"),
@@ -59,8 +60,8 @@ func TestRunChatLoopSendsConversationHistoryAcrossTurns(t *testing.T) {
 	if got, want := requests[0].Messages[0], (chatMessage{Role: "user", Content: "first"}); got != want {
 		t.Fatalf("first request message = %#v, want %#v", got, want)
 	}
-	if requests[0].Think == nil || *requests[0].Think {
-		t.Fatalf("first request think = %v, want false", requests[0].Think)
+	if requests[0].Think == nil || !*requests[0].Think {
+		t.Fatalf("first request think = %v, want true", requests[0].Think)
 	}
 
 	wantHistory := []chatMessage{
@@ -108,6 +109,7 @@ func TestRunChatLoopUsesArgsAsFirstMessageThenContinuesReadingStdin(t *testing.T
 	err := RunChatLoop(
 		"http://localhost:11434/api/chat",
 		"llama3.2",
+		true,
 		client,
 		[]string{"from", "args"},
 		strings.NewReader("/exit\n"),
@@ -123,5 +125,49 @@ func TestRunChatLoopUsesArgsAsFirstMessageThenContinuesReadingStdin(t *testing.T
 	}
 	if got, want := requests[0].Messages[0], (chatMessage{Role: "user", Content: "from args"}); got != want {
 		t.Fatalf("first request message = %#v, want %#v", got, want)
+	}
+}
+
+func TestRunChatLoopUsesConfiguredThinkValue(t *testing.T) {
+	var request chatRequest
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if err := json.NewDecoder(req.Body).Decode(&request); err != nil {
+				t.Fatalf("decode upstream request body: %v", err)
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body: io.NopCloser(strings.NewReader(
+					`{"message":{"content":"ok"}}` + "\n" +
+						`{"done":true}` + "\n",
+				)),
+			}, nil
+		}),
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	err := RunChatLoop(
+		"http://localhost:11434/api/chat",
+		"llama3.2",
+		false,
+		client,
+		[]string{"hello"},
+		strings.NewReader("/exit\n"),
+		&stdout,
+		&stderr,
+	)
+	if err != nil {
+		t.Fatalf("RunChatLoop returned error: %v", err)
+	}
+
+	if request.Think == nil {
+		t.Fatal("request think = nil, want false")
+	}
+	if *request.Think {
+		t.Fatal("request think = true, want false")
 	}
 }

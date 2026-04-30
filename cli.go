@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func RunChatLoop(endpoint string, model string, client *http.Client, initialArgs []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+func RunChatLoop(endpoint string, model string, think bool, client *http.Client, initialArgs []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	// client 允许测试注入假的 HTTP 客户端；真实运行时使用 http.DefaultClient。
 	// 这类“依赖从外面传进来”的写法，在写 agent 时很常见，因为后续可能要替换模型服务、
 	// 记录请求日志、增加重试，或者在测试里模拟模型响应。
@@ -57,8 +57,8 @@ func RunChatLoop(endpoint string, model string, client *http.Client, initialArgs
 
 		// 把这一轮用户输入加入历史，再用完整历史构造请求。
 		messages = append(messages, chatMessage{Role: "user", Content: pending})
-		// think=true 时候，输出隐藏了 think 流，反之则会输出 think 流
-		think := true
+		// think=true 时，模型服务隐藏 think 流；think=false 时，模型服务显示 think 流。
+		// 这个值由 CLI 启动参数传入，而不是在循环里写死。
 		req, err := NewChatRequestWithMessagesThinkAndContext(context.Background(), endpoint, model, messages, &think)
 		if err != nil {
 			return err

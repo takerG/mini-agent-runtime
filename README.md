@@ -21,12 +21,19 @@ go run . -model llama3.2 "介绍一下你自己"
 Defaults:
 
 - API URL: `http://localhost:11434/api/chat`
-- Model: `llama3.2`
+- Model: `qwen3:4b`
+- Think output: hidden by default with `-think=true`
 
 You can override defaults with flags:
 
 ```powershell
 go run . -url http://localhost:11434/api/chat -model qwen2.5 "你好"
+```
+
+For thinking models such as Qwen3, use `-think=false` when you want to show the think stream:
+
+```powershell
+go run . -model qwen3:4b -think=false
 ```
 
 Or with environment variables:
