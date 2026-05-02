@@ -36,6 +36,22 @@ For thinking models such as Qwen3, use `-think=false` when you want to show the 
 go run . -model qwen3:4b -think=false
 ```
 
+## Agent Tools
+
+The CLI now sends two tool definitions to the model on every chat turn:
+
+- `current_time`: returns the current local time.
+- `calculator`: runs basic `+`, `-`, `*`, `/` calculations.
+
+When the model decides a question needs a tool, the app executes the Go function, appends the tool result to the conversation history, and asks the model again for the final answer.
+
+Example prompts:
+
+```text
+现在几点？
+23 * 19 等于多少？
+```
+
 Or with environment variables:
 
 ```powershell

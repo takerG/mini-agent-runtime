@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -108,7 +109,7 @@ func TestNewChatRequestWithMessagesBuildsConversationHistoryPayload(t *testing.T
 		t.Fatalf("message count = %d, want %d", got, want)
 	}
 	for i, want := range messages {
-		if body.Messages[i] != want {
+		if !reflect.DeepEqual(body.Messages[i], want) {
 			t.Fatalf("message[%d] = %#v, want %#v", i, body.Messages[i], want)
 		}
 	}

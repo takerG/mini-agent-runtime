@@ -26,6 +26,14 @@ type chatMessage struct {
 	// 第一版只发送一条 user 消息。
 	Role    string `json:"role"`
 	Content string `json:"content"`
+
+	// ToolCalls 是模型请求调用工具时返回的结构。
+	// 当模型认为“我需要计算器/当前时间”时，它不会直接编造答案，
+	// 而是返回 tool_calls，Go 代码执行工具后再把结果发回模型。
+	ToolCalls []toolCall `json:"tool_calls,omitempty"`
+
+	// ToolName 用在 role=tool 的消息上，表示这条工具结果来自哪个工具。
+	ToolName string `json:"name,omitempty"`
 }
 
 type chatRequest struct {
@@ -43,6 +51,30 @@ type chatRequest struct {
 	//   true  表示隐藏 think 流，只输出最终回答相关内容；
 	//   false 表示显示 think 流，便于观察模型推理过程。
 	Think *bool `json:"think,omitempty"`
+
+	// Tools 告诉模型“你可以调用哪些工具，以及工具参数长什么样”。
+	// 模型看到这些描述后，会在合适的语境下返回 tool_calls。
+	Tools []toolDefinition `json:"tools,omitempty"`
+}
+
+type toolCall struct {
+	Function toolFunctionCall `json:"function"`
+}
+
+type toolFunctionCall struct {
+	Name      string         `json:"name"`
+	Arguments map[string]any `json:"arguments"`
+}
+
+type toolDefinition struct {
+	Type     string          `json:"type"`
+	Function toolDescription `json:"function"`
+}
+
+type toolDescription struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
 }
 
 type chatResponse struct {
@@ -81,6 +113,10 @@ func NewChatRequestWithMessagesAndContext(ctx context.Context, endpoint string, 
 }
 
 func NewChatRequestWithMessagesThinkAndContext(ctx context.Context, endpoint string, model string, messages []chatMessage, think *bool) (*http.Request, error) {
+	return NewChatRequestWithMessagesThinkToolsAndContext(ctx, endpoint, model, messages, think, nil)
+}
+
+func NewChatRequestWithMessagesThinkToolsAndContext(ctx context.Context, endpoint string, model string, messages []chatMessage, think *bool, tools []toolDefinition) (*http.Request, error) {
 	// 这里把用户的一句话包装成 Ollama chat API 需要的 JSON 结构。
 	// 未来做 agent 时，可以在 Messages 里加入：
 	//   1. system prompt
@@ -93,6 +129,7 @@ func NewChatRequestWithMessagesThinkAndContext(ctx context.Context, endpoint str
 		Messages: append([]chatMessage(nil), messages...),
 		Stream:   true,
 		Think:    think,
+		Tools:    append([]toolDefinition(nil), tools...),
 	}
 
 	// 用 json.Encoder 写入 bytes.Buffer，比手写字符串安全：
@@ -121,7 +158,13 @@ func StreamChatContent(r io.Reader, w io.Writer) error {
 }
 
 func StreamChatContentAndCapture(r io.Reader, w io.Writer) (string, error) {
+	content, _, err := StreamChatMessageAndCapture(r, w)
+	return content, err
+}
+
+func StreamChatMessageAndCapture(r io.Reader, w io.Writer) (string, []toolCall, error) {
 	var captured strings.Builder
+	var toolCalls []toolCall
 
 	// Ollama 的 stream=true 响应是“newline-delimited JSON”：
 	// 每一行都是一个完整 JSON 对象，行与行之间用 \n 分隔。
@@ -139,10 +182,13 @@ func StreamChatContentAndCapture(r io.Reader, w io.Writer) (string, error) {
 		// 这一步就是“流式接收”：不等待完整回答，只处理当前刚到的一小块。
 		var response chatResponse
 		if err := json.Unmarshal(line, &response); err != nil {
-			return captured.String(), fmt.Errorf("decode chat response: %w", err)
+			return captured.String(), toolCalls, fmt.Errorf("decode chat response: %w", err)
 		}
 		if response.Error != "" {
-			return captured.String(), fmt.Errorf("chat response error: %s", response.Error)
+			return captured.String(), toolCalls, fmt.Errorf("chat response error: %s", response.Error)
+		}
+		if len(response.Message.ToolCalls) > 0 {
+			toolCalls = append(toolCalls, response.Message.ToolCalls...)
 		}
 
 		// 结束行可能只有 {"done":true}，没有 content。
@@ -155,7 +201,7 @@ func StreamChatContentAndCapture(r io.Reader, w io.Writer) (string, error) {
 		// 对 CLI 来说，w 是 os.Stdout；
 		// 对 HTTP 代理来说，w 是 http.ResponseWriter。
 		if _, err := io.WriteString(w, response.Message.Content); err != nil {
-			return captured.String(), fmt.Errorf("write chat content: %w", err)
+			return captured.String(), toolCalls, fmt.Errorf("write chat content: %w", err)
 		}
 		captured.WriteString(response.Message.Content)
 
@@ -173,7 +219,7 @@ func StreamChatContentAndCapture(r io.Reader, w io.Writer) (string, error) {
 	//   2. 读取过程中出错，例如网络断开
 	// scanner.Err() 用来区分这两种情况。
 	if err := scanner.Err(); err != nil {
-		return captured.String(), fmt.Errorf("read chat response: %w", err)
+		return captured.String(), toolCalls, fmt.Errorf("read chat response: %w", err)
 	}
-	return captured.String(), nil
+	return captured.String(), toolCalls, nil
 }
