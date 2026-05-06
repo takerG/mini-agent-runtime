@@ -1,4 +1,4 @@
-package main
+package ollama
 
 import (
 	"bytes"
@@ -90,7 +90,7 @@ func TestStreamChatContentReturnsDecodeErrorForInvalidJSON(t *testing.T) {
 }
 
 func TestNewChatRequestWithMessagesBuildsConversationHistoryPayload(t *testing.T) {
-	messages := []chatMessage{
+	messages := []Message{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi"},
 		{Role: "user", Content: "what did I say?"},
@@ -101,7 +101,7 @@ func TestNewChatRequestWithMessagesBuildsConversationHistoryPayload(t *testing.T
 		t.Fatalf("NewChatRequestWithMessages returned error: %v", err)
 	}
 
-	var body chatRequest
+	var body ChatRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		t.Fatalf("decode request body: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestNewChatRequestBuildsStreamingChatPayload(t *testing.T) {
 		t.Fatalf("content-type = %q, want %q", got, want)
 	}
 
-	var body chatRequest
+	var body ChatRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		t.Fatalf("decode request body: %v", err)
 	}

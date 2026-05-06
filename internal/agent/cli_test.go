@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"encoding/json"
@@ -7,13 +7,21 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"mini-agent-runtime/internal/ollama"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
 func TestRunChatLoopSendsConversationHistoryAcrossTurns(t *testing.T) {
-	var requests []chatRequest
+	var requests []ollama.ChatRequest
 	client := &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			var body chatRequest
+			var body ollama.ChatRequest
 			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 				t.Fatalf("decode upstream request body: %v", err)
 			}
@@ -58,14 +66,14 @@ func TestRunChatLoopSendsConversationHistoryAcrossTurns(t *testing.T) {
 	if got, want := len(requests[0].Messages), 1; got != want {
 		t.Fatalf("first request message count = %d, want %d", got, want)
 	}
-	if got, want := requests[0].Messages[0], (chatMessage{Role: "user", Content: "first"}); !reflect.DeepEqual(got, want) {
+	if got, want := requests[0].Messages[0], (ollama.Message{Role: "user", Content: "first"}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("first request message = %#v, want %#v", got, want)
 	}
 	if requests[0].Think == nil || !*requests[0].Think {
 		t.Fatalf("first request think = %v, want true", requests[0].Think)
 	}
 
-	wantHistory := []chatMessage{
+	wantHistory := []ollama.Message{
 		{Role: "user", Content: "first"},
 		{Role: "assistant", Content: "answer one"},
 		{Role: "user", Content: "second"},
@@ -84,10 +92,10 @@ func TestRunChatLoopSendsConversationHistoryAcrossTurns(t *testing.T) {
 }
 
 func TestRunChatLoopUsesArgsAsFirstMessageThenContinuesReadingStdin(t *testing.T) {
-	var requests []chatRequest
+	var requests []ollama.ChatRequest
 	client := &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			var body chatRequest
+			var body ollama.ChatRequest
 			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 				t.Fatalf("decode upstream request body: %v", err)
 			}
@@ -124,13 +132,13 @@ func TestRunChatLoopUsesArgsAsFirstMessageThenContinuesReadingStdin(t *testing.T
 	if got, want := len(requests), 1; got != want {
 		t.Fatalf("request count = %d, want %d", got, want)
 	}
-	if got, want := requests[0].Messages[0], (chatMessage{Role: "user", Content: "from args"}); !reflect.DeepEqual(got, want) {
+	if got, want := requests[0].Messages[0], (ollama.Message{Role: "user", Content: "from args"}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("first request message = %#v, want %#v", got, want)
 	}
 }
 
 func TestRunChatLoopUsesConfiguredThinkValue(t *testing.T) {
-	var request chatRequest
+	var request ollama.ChatRequest
 	client := &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			if err := json.NewDecoder(req.Body).Decode(&request); err != nil {
@@ -174,7 +182,7 @@ func TestRunChatLoopUsesConfiguredThinkValue(t *testing.T) {
 }
 
 func TestRunChatLoopSendsToolDefinitions(t *testing.T) {
-	var request chatRequest
+	var request ollama.ChatRequest
 	client := &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			if err := json.NewDecoder(req.Body).Decode(&request); err != nil {
@@ -212,19 +220,22 @@ func TestRunChatLoopSendsToolDefinitions(t *testing.T) {
 	if got, want := len(request.Tools), 2; got != want {
 		t.Fatalf("tool count = %d, want %d", got, want)
 	}
-	if got, want := request.Tools[0].Function.Name, "current_time"; got != want {
-		t.Fatalf("first tool name = %q, want %q", got, want)
+	toolNames := map[string]bool{}
+	for _, tool := range request.Tools {
+		toolNames[tool.Function.Name] = true
 	}
-	if got, want := request.Tools[1].Function.Name, "calculator"; got != want {
-		t.Fatalf("second tool name = %q, want %q", got, want)
+	for _, want := range []string{"current_time", "calculator"} {
+		if !toolNames[want] {
+			t.Fatalf("tool names = %v, want %q", toolNames, want)
+		}
 	}
 }
 
 func TestRunChatLoopExecutesCalculatorToolCallThenAsksModelForFinalAnswer(t *testing.T) {
-	var requests []chatRequest
+	var requests []ollama.ChatRequest
 	client := &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			var body chatRequest
+			var body ollama.ChatRequest
 			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 				t.Fatalf("decode upstream request body: %v", err)
 			}
@@ -294,10 +305,10 @@ func TestRunChatLoopExecutesCalculatorToolCallThenAsksModelForFinalAnswer(t *tes
 }
 
 func TestRunChatLoopReturnsUnknownToolErrorToModel(t *testing.T) {
-	var requests []chatRequest
+	var requests []ollama.ChatRequest
 	client := &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			var body chatRequest
+			var body ollama.ChatRequest
 			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 				t.Fatalf("decode upstream request body: %v", err)
 			}
@@ -352,8 +363,16 @@ func TestRunChatLoopReturnsUnknownToolErrorToModel(t *testing.T) {
 	if got, want := toolMessage.ToolName, "missing_tool"; got != want {
 		t.Fatalf("tool message name = %q, want %q", got, want)
 	}
-	if !strings.Contains(toolMessage.Content, "tool error: unknown tool: missing_tool") {
-		t.Fatalf("tool message content = %q, want unknown tool error", toolMessage.Content)
+	for _, want := range []string{
+		"tool error:",
+		"code=tool_execution_failed",
+		"origin=tools.registry",
+		"node_chain=agent.tool_call > tools.registry",
+		"detail=unknown tool: missing_tool",
+	} {
+		if !strings.Contains(toolMessage.Content, want) {
+			t.Fatalf("tool message content = %q, want substring %q", toolMessage.Content, want)
+		}
 	}
 	if got, want := stdout.String(), "tool unavailable\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
@@ -361,10 +380,10 @@ func TestRunChatLoopReturnsUnknownToolErrorToModel(t *testing.T) {
 }
 
 func TestRunChatLoopReturnsToolExecutionErrorToModel(t *testing.T) {
-	var requests []chatRequest
+	var requests []ollama.ChatRequest
 	client := &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			var body chatRequest
+			var body ollama.ChatRequest
 			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 				t.Fatalf("decode upstream request body: %v", err)
 			}
@@ -419,10 +438,82 @@ func TestRunChatLoopReturnsToolExecutionErrorToModel(t *testing.T) {
 	if got, want := toolMessage.ToolName, "calculator"; got != want {
 		t.Fatalf("tool message name = %q, want %q", got, want)
 	}
-	if !strings.Contains(toolMessage.Content, "tool error: division by zero") {
-		t.Fatalf("tool message content = %q, want division by zero error", toolMessage.Content)
+	for _, want := range []string{
+		"tool error:",
+		"code=tool_execution_failed",
+		"origin=tools.calculator",
+		"node_chain=agent.tool_call > tools.calculator",
+		"detail=division by zero",
+	} {
+		if !strings.Contains(toolMessage.Content, want) {
+			t.Fatalf("tool message content = %q, want substring %q", toolMessage.Content, want)
+		}
 	}
 	if got, want := stdout.String(), "cannot divide by zero\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRunChatLoopDebugPrintsToolErrorDetails(t *testing.T) {
+	var requests []ollama.ChatRequest
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			var body ollama.ChatRequest
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatalf("decode upstream request body: %v", err)
+			}
+			requests = append(requests, body)
+
+			if len(requests) == 1 {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     make(http.Header),
+					Body: io.NopCloser(strings.NewReader(
+						`{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"missing_tool","arguments":{}}}]},"done":true}` + "\n",
+					)),
+				}, nil
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body: io.NopCloser(strings.NewReader(
+					`{"message":{"content":"handled"}}` + "\n" +
+						`{"done":true}` + "\n",
+				)),
+			}, nil
+		}),
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	err := RunChatLoopWithOptions(ChatLoopOptions{
+		Endpoint:    "http://localhost:11434/api/chat",
+		Model:       "llama3.2",
+		Think:       true,
+		Client:      client,
+		InitialArgs: []string{"use a missing tool"},
+		Stdin:       strings.NewReader("/exit\n"),
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		Debug:       true,
+	})
+	if err != nil {
+		t.Fatalf("RunChatLoopWithOptions returned error: %v", err)
+	}
+
+	got := stderr.String()
+	for _, want := range []string{
+		"[debug] error:",
+		"code=tool_execution_failed",
+		"origin=tools.registry",
+		"node_chain=agent.tool_call > tools.registry",
+		"detail=unknown tool: missing_tool",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stderr = %q, want substring %q", got, want)
+		}
 	}
 }

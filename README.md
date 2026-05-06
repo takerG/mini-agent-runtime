@@ -1,6 +1,6 @@
 # mini-agent-runtime
 
-A minimal Go CLI for streaming multi-turn chat from a local Ollama-compatible model API.
+A minimal Go agent runtime for streaming multi-turn chat from a local Ollama-compatible model API.
 
 ## Usage
 
@@ -10,7 +10,7 @@ Start an interactive multi-turn chat:
 go run . -model llama3.2
 ```
 
-Use `go run .` from the project directory. Do not run only `go run .\main.go`, because this project is split across multiple `.go` files and Go will compile only `main.go` in that form.
+Use `go run .` from the project directory. The root package now keeps only `main.go`; all agent components live under `internal/`.
 
 Then type one message per line. Use `/exit`, `/quit`, `exit`, or `quit` to leave.
 
@@ -48,9 +48,17 @@ Trace logs are written to stderr and include user turns, model requests, model r
 
 Internally, trace uses structured hooks. The default CLI sink formats those events as stderr logs, and future sinks can reuse the same events for files, metrics, or UI panels.
 
+Enable debug error output when you want structured error details on stderr:
+
+```powershell
+go run . -model qwen3:4b -debug "23 / 0 等于多少？"
+```
+
+Debug output is controlled by `-debug`. It includes stable error codes, the origin node where the error happened, and the node chain that shows how the error traveled through the runtime.
+
 ## Agent Tools
 
-The CLI now sends two tool definitions to the model on every chat turn:
+The CLI sends two tool definitions to the model on every chat turn:
 
 - `current_time`: returns the current local time.
 - `calculator`: runs basic `+`, `-`, `*`, `/` calculations.
@@ -59,7 +67,7 @@ When the model decides a question needs a tool, the app executes the Go function
 
 If a tool does not exist or returns an error, the CLI does not exit immediately. It appends a `role=tool` message such as `tool error: ...` and lets the model decide whether to retry, switch tools, or explain the problem to the user.
 
-Tools are managed through a registry in `agent_tools.go`. To add a new tool, implement the `Tool` interface with `Definition()` and `Execute(...)`, then register the tool instance in `DefaultToolRegistry`.
+Tools are managed through `ToolRegistry` in `internal/tools`. To add a new tool, implement the `Tool` interface with `Name()`, `Description()`, `Definition()`, and `Execute(ctx, args)`, then register the tool instance in `NewDefaultToolRegistry`.
 
 Example prompts:
 
@@ -93,6 +101,20 @@ curl.exe -N -X POST http://127.0.0.1:8080/chat `
 ```
 
 The server posts to `http://localhost:11434/api/chat` with `stream: true`, reads each streamed JSON line, writes `message.content` to the HTTP response, and flushes every chunk immediately.
+
+## Architecture
+
+The entrypoint is intentionally thin:
+
+- `main.go`: parses flags, chooses CLI or HTTP server mode, wires components together.
+- `internal/agent`: owns the multi-turn CLI loop, tool-call rounds, history, and tool error feedback.
+- `internal/ollama`: owns Ollama-compatible request payloads and streaming NDJSON parsing.
+- `internal/tools`: owns `Tool`, `ToolRegistry`, built-in tools, and tool argument validation.
+- `internal/trace`: owns structured trace events, hooks, and the stderr logger sink.
+- `internal/errors`: owns error codes, runtime nodes, model-friendly error formatting, operator logs, and debug output.
+- `internal/server`: owns the streaming HTTP proxy handler.
+
+This layout keeps provider protocol, tool execution, tracing, runtime orchestration, and transport concerns separated, so later tools or model providers can be added without growing `main.go`.
 
 ## Development
 

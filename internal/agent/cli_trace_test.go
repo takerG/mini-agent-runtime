@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"encoding/json"
@@ -6,13 +6,16 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"mini-agent-runtime/internal/ollama"
+	tracing "mini-agent-runtime/internal/trace"
 )
 
 func TestRunChatLoopWithTraceLogsAgentToolFlow(t *testing.T) {
-	var requests []chatRequest
+	var requests []ollama.ChatRequest
 	client := &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			var body chatRequest
+			var body ollama.ChatRequest
 			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 				t.Fatalf("decode upstream request body: %v", err)
 			}
@@ -53,26 +56,26 @@ func TestRunChatLoopWithTraceLogsAgentToolFlow(t *testing.T) {
 		strings.NewReader("/exit\n"),
 		&stdout,
 		&stderr,
-		NewTraceHooks(sink),
+		tracing.NewTraceHooks(sink),
 	)
 	if err != nil {
 		t.Fatalf("RunChatLoopWithTrace returned error: %v", err)
 	}
 
-	gotNames := make([]TraceEventName, 0, len(sink.events))
+	gotNames := make([]tracing.TraceEventName, 0, len(sink.events))
 	for _, event := range sink.events {
 		gotNames = append(gotNames, event.Name)
 	}
-	for _, want := range []TraceEventName{
-		TraceChatLoopStart,
-		TraceTurnInput,
-		TraceModelRequest,
-		TraceModelResponse,
-		TraceToolCall,
-		TraceToolResult,
-		TraceModelRequest,
-		TraceModelResponse,
-		TraceFinalAnswer,
+	for _, want := range []tracing.TraceEventName{
+		tracing.TraceChatLoopStart,
+		tracing.TraceTurnInput,
+		tracing.TraceModelRequest,
+		tracing.TraceModelResponse,
+		tracing.TraceToolCall,
+		tracing.TraceToolResult,
+		tracing.TraceModelRequest,
+		tracing.TraceModelResponse,
+		tracing.TraceFinalAnswer,
 	} {
 		if !traceNamesContain(gotNames, want) {
 			t.Fatalf("trace events missing %q in %#v", want, gotNames)
@@ -80,11 +83,19 @@ func TestRunChatLoopWithTraceLogsAgentToolFlow(t *testing.T) {
 	}
 }
 
-func traceNamesContain(names []TraceEventName, want TraceEventName) bool {
+func traceNamesContain(names []tracing.TraceEventName, want tracing.TraceEventName) bool {
 	for _, name := range names {
 		if name == want {
 			return true
 		}
 	}
 	return false
+}
+
+type recordingTraceSink struct {
+	events []tracing.TraceEvent
+}
+
+func (s *recordingTraceSink) Emit(event tracing.TraceEvent) {
+	s.events = append(s.events, event)
 }
