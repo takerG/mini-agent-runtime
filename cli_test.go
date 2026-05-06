@@ -292,3 +292,137 @@ func TestRunChatLoopExecutesCalculatorToolCallThenAsksModelForFinalAnswer(t *tes
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
+
+func TestRunChatLoopReturnsUnknownToolErrorToModel(t *testing.T) {
+	var requests []chatRequest
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			var body chatRequest
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatalf("decode upstream request body: %v", err)
+			}
+			requests = append(requests, body)
+
+			if len(requests) == 1 {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     make(http.Header),
+					Body: io.NopCloser(strings.NewReader(
+						`{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"missing_tool","arguments":{}}}]},"done":true}` + "\n",
+					)),
+				}, nil
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body: io.NopCloser(strings.NewReader(
+					`{"message":{"content":"tool unavailable"}}` + "\n" +
+						`{"done":true}` + "\n",
+				)),
+			}, nil
+		}),
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	err := RunChatLoop(
+		"http://localhost:11434/api/chat",
+		"llama3.2",
+		true,
+		client,
+		[]string{"use a missing tool"},
+		strings.NewReader("/exit\n"),
+		&stdout,
+		&stderr,
+	)
+	if err != nil {
+		t.Fatalf("RunChatLoop returned error: %v", err)
+	}
+
+	if got, want := len(requests), 2; got != want {
+		t.Fatalf("request count = %d, want %d", got, want)
+	}
+	toolMessage := requests[1].Messages[2]
+	if got, want := toolMessage.Role, "tool"; got != want {
+		t.Fatalf("tool message role = %q, want %q", got, want)
+	}
+	if got, want := toolMessage.ToolName, "missing_tool"; got != want {
+		t.Fatalf("tool message name = %q, want %q", got, want)
+	}
+	if !strings.Contains(toolMessage.Content, "tool error: unknown tool: missing_tool") {
+		t.Fatalf("tool message content = %q, want unknown tool error", toolMessage.Content)
+	}
+	if got, want := stdout.String(), "tool unavailable\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRunChatLoopReturnsToolExecutionErrorToModel(t *testing.T) {
+	var requests []chatRequest
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			var body chatRequest
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatalf("decode upstream request body: %v", err)
+			}
+			requests = append(requests, body)
+
+			if len(requests) == 1 {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     make(http.Header),
+					Body: io.NopCloser(strings.NewReader(
+						`{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"calculator","arguments":{"op":"/","a":8,"b":0}}}]},"done":true}` + "\n",
+					)),
+				}, nil
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body: io.NopCloser(strings.NewReader(
+					`{"message":{"content":"cannot divide by zero"}}` + "\n" +
+						`{"done":true}` + "\n",
+				)),
+			}, nil
+		}),
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	err := RunChatLoop(
+		"http://localhost:11434/api/chat",
+		"llama3.2",
+		true,
+		client,
+		[]string{"8/0"},
+		strings.NewReader("/exit\n"),
+		&stdout,
+		&stderr,
+	)
+	if err != nil {
+		t.Fatalf("RunChatLoop returned error: %v", err)
+	}
+
+	if got, want := len(requests), 2; got != want {
+		t.Fatalf("request count = %d, want %d", got, want)
+	}
+	toolMessage := requests[1].Messages[2]
+	if got, want := toolMessage.Role, "tool"; got != want {
+		t.Fatalf("tool message role = %q, want %q", got, want)
+	}
+	if got, want := toolMessage.ToolName, "calculator"; got != want {
+		t.Fatalf("tool message name = %q, want %q", got, want)
+	}
+	if !strings.Contains(toolMessage.Content, "tool error: division by zero") {
+		t.Fatalf("tool message content = %q, want division by zero error", toolMessage.Content)
+	}
+	if got, want := stdout.String(), "cannot divide by zero\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}

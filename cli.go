@@ -13,12 +13,23 @@ import (
 const maxToolRounds = 4
 
 func RunChatLoop(endpoint string, model string, think bool, client *http.Client, initialArgs []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	return RunChatLoopWithTrace(endpoint, model, think, client, initialArgs, stdin, stdout, stderr, NewTraceHooks(NewTraceLogger(false, stderr)))
+}
+
+func RunChatLoopWithTrace(endpoint string, model string, think bool, client *http.Client, initialArgs []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, trace *TraceHooks) error {
 	// client 允许测试注入假的 HTTP 客户端；真实运行时使用 http.DefaultClient。
 	// 这类“依赖从外面传进来”的写法，在写 agent 时很常见，因为后续可能要替换模型服务、
 	// 记录请求日志、增加重试，或者在测试里模拟模型响应。
 	if client == nil {
 		client = http.DefaultClient
 	}
+	toolRegistry := DefaultToolRegistry(time.Now)
+	trace.ChatLoopStart(ChatLoopStartTrace{
+		Endpoint: endpoint,
+		Model:    model,
+		Think:    think,
+		Tools:    len(toolRegistry.Definitions()),
+	})
 
 	// messages 就是多轮对话的记忆。
 	// 每轮用户输入会追加一条 role=user；
@@ -52,6 +63,7 @@ func RunChatLoop(endpoint string, model string, think bool, client *http.Client,
 
 		// 提供几个常见退出命令。EOF 也会退出，例如 Ctrl+Z 后回车（Windows）或 Ctrl+D（Unix）。
 		if isExitCommand(pending) {
+			trace.ChatLoopExit(ChatLoopExitTrace{Command: pending})
 			return nil
 		}
 		if pending == "" {
@@ -60,6 +72,7 @@ func RunChatLoop(endpoint string, model string, think bool, client *http.Client,
 
 		// 把这一轮用户输入加入历史，再用完整历史构造请求。
 		messages = append(messages, chatMessage{Role: "user", Content: pending})
+		trace.TurnInput(TurnInputTrace{Message: pending, HistoryMessages: len(messages)})
 
 		for toolRound := 0; ; toolRound++ {
 			if toolRound >= maxToolRounds {
@@ -68,10 +81,11 @@ func RunChatLoop(endpoint string, model string, think bool, client *http.Client,
 
 			// think=true 时，模型服务隐藏 think 流；think=false 时，模型服务显示 think 流。
 			// 这个值由 CLI 启动参数传入，而不是在循环里写死。
-			req, err := NewChatRequestWithMessagesThinkToolsAndContext(context.Background(), endpoint, model, messages, &think, AvailableTools())
+			req, err := NewChatRequestWithMessagesThinkToolsAndContext(context.Background(), endpoint, model, messages, &think, toolRegistry.Definitions())
 			if err != nil {
 				return err
 			}
+			trace.ModelRequest(ModelRequestTrace{ToolRound: toolRound, Messages: len(messages), Tools: len(toolRegistry.Definitions())})
 
 			resp, err := client.Do(req)
 			if err != nil {
@@ -95,6 +109,7 @@ func RunChatLoop(endpoint string, model string, think bool, client *http.Client,
 			if closeErr != nil {
 				return fmt.Errorf("close chat response: %w", closeErr)
 			}
+			trace.ModelResponse(ModelResponseTrace{ToolRound: toolRound, ContentChars: len([]rune(assistantMessage)), ToolCalls: len(toolCalls)})
 
 			if len(toolCalls) == 0 {
 				// 每轮模型回答结束后补一个换行，让下一轮提示符从新行开始。
@@ -102,6 +117,7 @@ func RunChatLoop(endpoint string, model string, think bool, client *http.Client,
 				if assistantMessage != "" {
 					messages = append(messages, chatMessage{Role: "assistant", Content: assistantMessage})
 				}
+				trace.FinalAnswer(FinalAnswerTrace{ContentChars: len([]rune(assistantMessage)), HistoryMessages: len(messages)})
 				break
 			}
 
@@ -111,10 +127,9 @@ func RunChatLoop(endpoint string, model string, think bool, client *http.Client,
 				ToolCalls: toolCalls,
 			})
 			for _, call := range toolCalls {
-				result, err := ExecuteToolCall(call, time.Now)
-				if err != nil {
-					result = fmt.Sprintf("tool error: %v", err)
-				}
+				trace.ToolCall(ToolCallTrace{Name: call.Function.Name, Arguments: call.Function.Arguments})
+				result := executeToolCallForModel(toolRegistry, call, trace)
+				trace.ToolResult(ToolResultTrace{Name: call.Function.Name, Result: result})
 				messages = append(messages, chatMessage{
 					Role:     "tool",
 					Content:  result,
@@ -126,6 +141,20 @@ func RunChatLoop(endpoint string, model string, think bool, client *http.Client,
 		// 清空 pending，下一次循环就会从 stdin 读取新的用户输入。
 		pending = ""
 	}
+}
+
+func executeToolCallForModel(toolRegistry *ToolRegistry, call toolCall, trace *TraceHooks) string {
+	// 工具调用失败时不要把错误继续向外 return，否则整个 CLI 对话会被中断。
+	// 对 agent 来说，更合理的做法是把错误包装成一条 role=tool 的消息交还给模型：
+	//   - 如果模型调用了不存在的工具，模型可以根据错误改用已有工具，或者直接向用户解释。
+	//   - 如果工具参数不合法、工具内部失败，模型也有机会重新组织参数后再试一次。
+	// 这就是 agent 常见的“观察结果 observation 回灌给模型”的思路。
+	result, err := toolRegistry.Execute(call)
+	if err != nil {
+		trace.ToolError(ToolErrorTrace{Name: call.Function.Name, Error: err})
+		return fmt.Sprintf("tool error: %v", err)
+	}
+	return result
 }
 
 func isExitCommand(message string) bool {
