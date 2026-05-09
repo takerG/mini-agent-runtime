@@ -8,15 +8,20 @@ import (
 type TraceEventName string
 
 const (
-	TraceChatLoopStart TraceEventName = "chat_loop_start"
-	TraceChatLoopExit  TraceEventName = "chat_loop_exit"
-	TraceTurnInput     TraceEventName = "turn_input"
-	TraceModelRequest  TraceEventName = "model_request"
-	TraceModelResponse TraceEventName = "model_response"
-	TraceToolCall      TraceEventName = "tool_call"
-	TraceToolResult    TraceEventName = "tool_result"
-	TraceToolError     TraceEventName = "tool_error"
-	TraceFinalAnswer   TraceEventName = "final_answer"
+	TraceChatLoopStart   TraceEventName = "chat_loop_start"
+	TraceChatLoopExit    TraceEventName = "chat_loop_exit"
+	TraceTurnInput       TraceEventName = "turn_input"
+	TraceModelRequest    TraceEventName = "model_request"
+	TraceModelResponse   TraceEventName = "model_response"
+	TraceToolCall        TraceEventName = "tool_call"
+	TraceToolResult      TraceEventName = "tool_result"
+	TraceToolError       TraceEventName = "tool_error"
+	TracePlannerRequest  TraceEventName = "planner_request"
+	TracePlannerResponse TraceEventName = "planner_response"
+	TraceExecutorStart   TraceEventName = "executor_start"
+	TraceExecutorStep    TraceEventName = "executor_step"
+	TraceExecutorFinish  TraceEventName = "executor_finish"
+	TraceFinalAnswer     TraceEventName = "final_answer"
 )
 
 type TraceEvent struct {
@@ -86,6 +91,29 @@ type ToolErrorTrace struct {
 	Error error
 }
 
+type PlannerRequestTrace struct {
+	MessageChars int
+}
+
+type PlannerResponseTrace struct {
+	Goal  string
+	Steps int
+}
+
+type ExecutorStartTrace struct {
+	Steps int
+}
+
+type ExecutorStepTrace struct {
+	Index    int
+	Task     string
+	ToolHint string
+}
+
+type ExecutorFinishTrace struct {
+	ContentChars int
+}
+
 type FinalAnswerTrace struct {
 	ContentChars    int
 	HistoryMessages int
@@ -121,6 +149,26 @@ func (h *TraceHooks) ToolResult(data ToolResultTrace) {
 
 func (h *TraceHooks) ToolError(data ToolErrorTrace) {
 	h.emit(TraceToolError, data)
+}
+
+func (h *TraceHooks) PlannerRequest(data PlannerRequestTrace) {
+	h.emit(TracePlannerRequest, data)
+}
+
+func (h *TraceHooks) PlannerResponse(data PlannerResponseTrace) {
+	h.emit(TracePlannerResponse, data)
+}
+
+func (h *TraceHooks) ExecutorStart(data ExecutorStartTrace) {
+	h.emit(TraceExecutorStart, data)
+}
+
+func (h *TraceHooks) ExecutorStep(data ExecutorStepTrace) {
+	h.emit(TraceExecutorStep, data)
+}
+
+func (h *TraceHooks) ExecutorFinish(data ExecutorFinishTrace) {
+	h.emit(TraceExecutorFinish, data)
 }
 
 func (h *TraceHooks) FinalAnswer(data FinalAnswerTrace) {
@@ -172,6 +220,16 @@ func formatTraceData(data any) string {
 		return fmt.Sprintf("name=%s result=%s", value.Name, value.Result)
 	case ToolErrorTrace:
 		return fmt.Sprintf("name=%s error=%v", value.Name, value.Error)
+	case PlannerRequestTrace:
+		return fmt.Sprintf("message_chars=%d", value.MessageChars)
+	case PlannerResponseTrace:
+		return fmt.Sprintf("goal=%q steps=%d", value.Goal, value.Steps)
+	case ExecutorStartTrace:
+		return fmt.Sprintf("steps=%d", value.Steps)
+	case ExecutorStepTrace:
+		return fmt.Sprintf("index=%d task=%q tool_hint=%q", value.Index, value.Task, value.ToolHint)
+	case ExecutorFinishTrace:
+		return fmt.Sprintf("content_chars=%d", value.ContentChars)
 	case FinalAnswerTrace:
 		return fmt.Sprintf("content_chars=%d history_messages=%d", value.ContentChars, value.HistoryMessages)
 	default:

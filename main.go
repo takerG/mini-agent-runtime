@@ -23,6 +23,7 @@ func main() {
 	think := flag.Bool("think", true, "hide model thinking output when true; show it when false")
 	trace := flag.Bool("trace", false, "write agent trace logs to stderr")
 	debug := flag.Bool("debug", false, "write structured debug error details to stderr")
+	mode := flag.String("mode", string(agent.ModeChat), "agent mode: chat or plan")
 	serveAddr := flag.String("serve", "", "serve a streaming HTTP proxy on this address, for example 127.0.0.1:8080")
 	flag.Parse()
 
@@ -45,6 +46,7 @@ func main() {
 		Stderr:      os.Stderr,
 		Trace:       tracing.NewTraceHooks(tracing.NewTraceLogger(*trace, os.Stderr)),
 		Debug:       *debug,
+		Mode:        agent.Mode(*mode),
 	})
 	if err != nil {
 		exitWithError(err, *debug)

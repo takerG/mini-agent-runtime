@@ -56,6 +56,29 @@ go run . -model qwen3:4b -debug "23 / 0 等于多少？"
 
 Debug output is controlled by `-debug`. It includes stable error codes, the origin node where the error happened, and the node chain that shows how the error traveled through the runtime.
 
+Enable planner/executor mode when you want the runtime to plan first, then execute the plan with native tool calls:
+
+```powershell
+go run . -mode plan "现在几点？顺便算一下 23 * 19"
+```
+
+In `plan` mode the CLI prints the full process:
+
+```text
+[plan]
+1. tool_call calculator {"a":23,"b":19,"op":"*"}
+2. tool_call current_time {}
+
+[observation]
+1. calculator -> 437
+2. current_time -> 2026-05-08 20:51:42 CST
+
+Agent:
+计算结果是 437，当前时间是 2026-05-08 20:51:42 CST。
+```
+
+The default mode is `chat`, which preserves the original direct native tool-calling behavior.
+
 ## Agent Tools
 
 The CLI sends two tool definitions to the model on every chat turn:
@@ -108,6 +131,8 @@ The entrypoint is intentionally thin:
 
 - `main.go`: parses flags, chooses CLI or HTTP server mode, wires components together.
 - `internal/agent`: owns the multi-turn CLI loop, tool-call rounds, history, and tool error feedback.
+- `internal/planner`: asks the model for a structured JSON plan before execution.
+- `internal/executor`: follows a plan, reuses native tool calls, and streams the final answer.
 - `internal/ollama`: owns Ollama-compatible request payloads and streaming NDJSON parsing.
 - `internal/tools`: owns `Tool`, `ToolRegistry`, built-in tools, and tool argument validation.
 - `internal/trace`: owns structured trace events, hooks, and the stderr logger sink.

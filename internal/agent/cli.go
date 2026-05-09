@@ -10,12 +10,21 @@ import (
 	"time"
 
 	apperrors "mini-agent-runtime/internal/errors"
+	"mini-agent-runtime/internal/executor"
 	"mini-agent-runtime/internal/ollama"
+	"mini-agent-runtime/internal/planner"
 	"mini-agent-runtime/internal/tools"
 	tracing "mini-agent-runtime/internal/trace"
 )
 
 const maxToolRounds = 4
+
+type Mode string
+
+const (
+	ModeChat Mode = "chat"
+	ModePlan Mode = "plan"
+)
 
 func RunChatLoop(endpoint string, model string, think bool, client *http.Client, initialArgs []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	return RunChatLoopWithTrace(endpoint, model, think, client, initialArgs, stdin, stdout, stderr, tracing.NewTraceHooks(tracing.NewTraceLogger(false, stderr)))
@@ -46,6 +55,7 @@ type ChatLoopOptions struct {
 	Stderr      io.Writer
 	Trace       *tracing.TraceHooks
 	Debug       bool
+	Mode        Mode
 }
 
 func RunChatLoopWithOptions(options ChatLoopOptions) error {
@@ -57,6 +67,10 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 	stdout := options.Stdout
 	stderr := options.Stderr
 	traceHooks := options.Trace
+	mode := options.Mode
+	if mode == "" {
+		mode = ModeChat
+	}
 
 	if client == nil {
 		client = http.DefaultClient
@@ -110,6 +124,25 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 		messages = append(messages, ollama.Message{Role: "user", Content: pending})
 		traceHooks.TurnInput(tracing.TurnInputTrace{Message: pending, HistoryMessages: len(messages)})
 
+		// Planner / Executor 模式
+		if mode == ModePlan {
+			assistantMessage, err := runPlannerExecutorTurn(context.Background(), endpoint, model, think, client, pending, stdout, traceHooks, reporter, toolRegistry)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout)
+			if assistantMessage != "" {
+				messages = append(messages, ollama.Message{Role: "assistant", Content: assistantMessage})
+			}
+			traceHooks.FinalAnswer(tracing.FinalAnswerTrace{ContentChars: len([]rune(assistantMessage)), HistoryMessages: len(messages)})
+			pending = ""
+			continue
+		}
+		if mode != ModeChat {
+			return apperrors.New(apperrors.NodeAgentLoop, apperrors.CodeInvalidUserInput, fmt.Sprintf("unknown agent mode: %s", mode))
+		}
+
+		// 普通模式
 		for toolRound := 0; ; toolRound++ {
 			if toolRound >= maxToolRounds {
 				return apperrors.New(apperrors.NodeAgentLoop, apperrors.CodeConversationLimit, "too many tool calls in one turn")
@@ -170,6 +203,28 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 
 		pending = ""
 	}
+}
+
+func runPlannerExecutorTurn(ctx context.Context, endpoint string, model string, think bool, client *http.Client, userMessage string, stdout io.Writer, traceHooks *tracing.TraceHooks, reporter *apperrors.Reporter, toolRegistry *tools.ToolRegistry) (string, error) {
+	traceHooks.PlannerRequest(tracing.PlannerRequestTrace{MessageChars: len([]rune(userMessage))})
+	plan, err := planner.NewPlanner(endpoint, model, think, client).PlanWithContext(ctx, userMessage)
+	if err != nil {
+		return "", err
+	}
+	traceHooks.PlannerResponse(tracing.PlannerResponseTrace{Goal: plan.Goal, Steps: len(plan.Steps)})
+
+	runtimeExecutor := executor.NewExecutor(executor.Options{
+		Endpoint:    endpoint,
+		Model:       model,
+		Think:       think,
+		Client:      client,
+		Registry:    toolRegistry,
+		Trace:       traceHooks,
+		Reporter:    reporter,
+		Stdout:      stdout,
+		ShowProcess: true,
+	})
+	return runtimeExecutor.Execute(ctx, userMessage, plan)
 }
 
 func executeToolCallForModel(ctx context.Context, toolRegistry *tools.ToolRegistry, call ollama.ToolCall, traceHooks *tracing.TraceHooks, reporter *apperrors.Reporter) string {

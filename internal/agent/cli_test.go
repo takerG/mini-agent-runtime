@@ -517,3 +517,92 @@ func TestRunChatLoopDebugPrintsToolErrorDetails(t *testing.T) {
 		}
 	}
 }
+
+func TestRunChatLoopPlannerExecutorModePlansThenExecutesWithTools(t *testing.T) {
+	var requests []ollama.ChatRequest
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			var body ollama.ChatRequest
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatalf("decode upstream request body: %v", err)
+			}
+			requests = append(requests, body)
+
+			switch len(requests) {
+			case 1:
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     make(http.Header),
+					Body: io.NopCloser(strings.NewReader(
+						`{"message":{"content":"{\"goal\":\"answer calculation\",\"steps\":[{\"task\":\"calculate 23*19\",\"tool_hint\":\"calculator\"}]}"}}` + "\n" +
+							`{"done":true}` + "\n",
+					)),
+				}, nil
+			case 2:
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     make(http.Header),
+					Body: io.NopCloser(strings.NewReader(
+						`{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"calculator","arguments":{"op":"*","a":23,"b":19}}}]},"done":true}` + "\n",
+					)),
+				}, nil
+			default:
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     make(http.Header),
+					Body: io.NopCloser(strings.NewReader(
+						`{"message":{"content":"23*19=437"}}` + "\n" +
+							`{"done":true}` + "\n",
+					)),
+				}, nil
+			}
+		}),
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	err := RunChatLoopWithOptions(ChatLoopOptions{
+		Endpoint:    "http://localhost:11434/api/chat",
+		Model:       "qwen3:4b",
+		Think:       true,
+		Client:      client,
+		InitialArgs: []string{"23 * 19?"},
+		Stdin:       strings.NewReader("/exit\n"),
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		Mode:        ModePlan,
+	})
+	if err != nil {
+		t.Fatalf("RunChatLoopWithOptions returned error: %v", err)
+	}
+
+	if got, want := len(requests), 3; got != want {
+		t.Fatalf("request count = %d, want %d", got, want)
+	}
+	if got, want := len(requests[0].Tools), 0; got != want {
+		t.Fatalf("planner request tool count = %d, want %d", got, want)
+	}
+	if got, want := len(requests[1].Tools), 2; got != want {
+		t.Fatalf("executor request tool count = %d, want %d", got, want)
+	}
+	if !strings.Contains(requests[1].Messages[0].Content, "calculate 23*19") {
+		t.Fatalf("executor system prompt = %q, want plan step", requests[1].Messages[0].Content)
+	}
+	wantOutput := strings.Join([]string{
+		"[plan]",
+		`1. tool_call calculator {"a":23,"b":19,"op":"*"}`,
+		"",
+		"[observation]",
+		"1. calculator -> 437",
+		"",
+		"Agent:",
+		"23*19=437",
+		"",
+	}, "\n")
+	if got := stdout.String(); got != wantOutput {
+		t.Fatalf("stdout = %q, want %q", got, wantOutput)
+	}
+}

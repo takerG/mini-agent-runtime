@@ -79,6 +79,38 @@ func TestStreamChatContentAndCaptureReturnsFullAssistantMessage(t *testing.T) {
 	}
 }
 
+func TestStreamChatMessageBeforeContentHookRunsOnceBeforeFirstWrite(t *testing.T) {
+	input := strings.NewReader(
+		`{"message":{"content":"a"}}` + "\n" +
+			`{"message":{"content":"b"}}` + "\n" +
+			`{"done":true}` + "\n",
+	)
+	var events []string
+	writer := writerFunc(func(p []byte) (int, error) {
+		events = append(events, "write:"+string(p))
+		return len(p), nil
+	})
+
+	content, _, err := StreamChatMessageAndCaptureWithOptions(input, StreamOptions{
+		Writer: writer,
+		BeforeContent: func() error {
+			events = append(events, "before")
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("StreamChatMessageAndCaptureWithOptions returned error: %v", err)
+	}
+
+	if got, want := content, "ab"; got != want {
+		t.Fatalf("content = %q, want %q", got, want)
+	}
+	wantEvents := []string{"before", "write:a", "write:b"}
+	if !reflect.DeepEqual(events, wantEvents) {
+		t.Fatalf("events = %#v, want %#v", events, wantEvents)
+	}
+}
+
 func TestStreamChatContentReturnsDecodeErrorForInvalidJSON(t *testing.T) {
 	input := strings.NewReader(`{"message":`)
 	var output bytes.Buffer
@@ -87,6 +119,12 @@ func TestStreamChatContentReturnsDecodeErrorForInvalidJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("StreamChatContent returned nil error, want decode error")
 	}
+}
+
+type writerFunc func([]byte) (int, error)
+
+func (fn writerFunc) Write(p []byte) (int, error) {
+	return fn(p)
 }
 
 func TestNewChatRequestWithMessagesBuildsConversationHistoryPayload(t *testing.T) {

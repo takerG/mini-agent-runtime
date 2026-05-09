@@ -165,8 +165,27 @@ func StreamChatContentAndCapture(r io.Reader, w io.Writer) (string, error) {
 }
 
 func StreamChatMessageAndCapture(r io.Reader, w io.Writer) (string, []ToolCall, error) {
+	return StreamChatMessageAndCaptureWithOptions(r, StreamOptions{Writer: w})
+}
+
+type StreamOptions struct {
+	// Writer 是 content chunk 的输出目标。
+	// CLI 场景通常是 os.Stdout，HTTP 代理场景通常是 http.ResponseWriter。
+	Writer io.Writer
+
+	// BeforeContent 会在第一个 content chunk 写出之前执行一次。
+	// 上层可以借它先打印过程信息、标题或分隔符，同时保留后续 token 的流式输出。
+	BeforeContent func() error
+}
+
+func StreamChatMessageAndCaptureWithOptions(r io.Reader, options StreamOptions) (string, []ToolCall, error) {
 	var captured strings.Builder
 	var ToolCalls []ToolCall
+	contentStarted := false
+	w := options.Writer
+	if w == nil {
+		w = io.Discard
+	}
 
 	// Ollama 的 stream=true 响应是“newline-delimited JSON”：
 	// 每一行都是一个完整 JSON 对象，行与行之间用 \n 分隔。
@@ -198,6 +217,13 @@ func StreamChatMessageAndCapture(r io.Reader, w io.Writer) (string, []ToolCall, 
 		if response.Message.Content == "" {
 			continue
 		}
+
+		if !contentStarted && options.BeforeContent != nil {
+			if err := options.BeforeContent(); err != nil {
+				return captured.String(), ToolCalls, apperrors.Wrap(apperrors.NodeOllamaStream, apperrors.CodeStreamWriteFailed, err, "run before content hook")
+			}
+		}
+		contentStarted = true
 
 		// 写出当前片段。
 		// 对 CLI 来说，w 是 os.Stdout；
