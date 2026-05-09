@@ -10,9 +10,8 @@ import (
 	"time"
 
 	apperrors "mini-agent-runtime/internal/errors"
-	"mini-agent-runtime/internal/executor"
+	modelclient "mini-agent-runtime/internal/model"
 	"mini-agent-runtime/internal/ollama"
-	"mini-agent-runtime/internal/planner"
 	"mini-agent-runtime/internal/tools"
 	tracing "mini-agent-runtime/internal/trace"
 )
@@ -90,6 +89,20 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 
 	reporter := apperrors.NewReporter(options.Debug, stderr)
 	toolRegistry := tools.NewDefaultToolRegistry(time.Now)
+	modelClient := modelclient.NewClient(modelclient.Options{
+		Endpoint: endpoint,
+		Model:    model,
+		Think:    think,
+		HTTP:     client,
+		Trace:    traceHooks,
+	})
+	runtime := NewRuntime(RuntimeOptions{
+		ModelClient: modelClient,
+		Tools:       toolRegistry,
+		Trace:       traceHooks,
+		Reporter:    reporter,
+		Stdout:      stdout,
+	})
 	traceHooks.ChatLoopStart(tracing.ChatLoopStartTrace{
 		Endpoint: endpoint,
 		Model:    model,
@@ -126,7 +139,7 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 
 		// Planner / Executor 模式
 		if mode == ModePlan {
-			assistantMessage, err := runPlannerExecutorTurn(context.Background(), endpoint, model, think, client, pending, stdout, traceHooks, reporter, toolRegistry)
+			assistantMessage, err := runtime.RunPlannerExecutorTurn(context.Background(), pending)
 			if err != nil {
 				return err
 			}
@@ -149,31 +162,19 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 			}
 
 			toolContext := context.Background()
-			req, err := ollama.NewChatRequestWithMessagesThinkToolsAndContext(toolContext, endpoint, model, messages, &think, toolRegistry.Definitions())
+			toolDefinitions := toolRegistry.Definitions()
+			result, err := modelClient.Chat(toolContext, modelclient.ChatOptions{
+				Phase:     "chat",
+				ToolRound: toolRound,
+				Messages:  messages,
+				Tools:     toolDefinitions,
+				Stream:    ollama.StreamOptions{Writer: stdout},
+			})
 			if err != nil {
-				return apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeRequestBuildFailed, err, "build chat request")
+				return err
 			}
-			traceHooks.ModelRequest(tracing.ModelRequestTrace{ToolRound: toolRound, Messages: len(messages), Tools: len(toolRegistry.Definitions())})
-
-			resp, err := client.Do(req)
-			if err != nil {
-				return apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeModelRequestFailed, err, "post chat request")
-			}
-
-			if resp.StatusCode < 200 || resp.StatusCode > 299 {
-				resp.Body.Close()
-				return apperrors.New(apperrors.NodeAgentLoop, apperrors.CodeUpstreamStatusFailed, fmt.Sprintf("chat request failed: %s", resp.Status))
-			}
-
-			assistantMessage, toolCalls, streamErr := ollama.StreamChatMessageAndCapture(resp.Body, stdout)
-			closeErr := resp.Body.Close()
-			if streamErr != nil {
-				return apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeModelRequestFailed, streamErr, "stream chat response")
-			}
-			if closeErr != nil {
-				return apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeResponseCloseFailed, closeErr, "close chat response")
-			}
-			traceHooks.ModelResponse(tracing.ModelResponseTrace{ToolRound: toolRound, ContentChars: len([]rune(assistantMessage)), ToolCalls: len(toolCalls)})
+			assistantMessage := result.Content
+			toolCalls := result.ToolCalls
 
 			if len(toolCalls) == 0 {
 				fmt.Fprintln(stdout)
@@ -203,28 +204,6 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 
 		pending = ""
 	}
-}
-
-func runPlannerExecutorTurn(ctx context.Context, endpoint string, model string, think bool, client *http.Client, userMessage string, stdout io.Writer, traceHooks *tracing.TraceHooks, reporter *apperrors.Reporter, toolRegistry *tools.ToolRegistry) (string, error) {
-	traceHooks.PlannerRequest(tracing.PlannerRequestTrace{MessageChars: len([]rune(userMessage))})
-	plan, err := planner.NewPlanner(endpoint, model, think, client).PlanWithContext(ctx, userMessage)
-	if err != nil {
-		return "", err
-	}
-	traceHooks.PlannerResponse(tracing.PlannerResponseTrace{Goal: plan.Goal, Steps: len(plan.Steps)})
-
-	runtimeExecutor := executor.NewExecutor(executor.Options{
-		Endpoint:    endpoint,
-		Model:       model,
-		Think:       think,
-		Client:      client,
-		Registry:    toolRegistry,
-		Trace:       traceHooks,
-		Reporter:    reporter,
-		Stdout:      stdout,
-		ShowProcess: true,
-	})
-	return runtimeExecutor.Execute(ctx, userMessage, plan)
 }
 
 func executeToolCallForModel(ctx context.Context, toolRegistry *tools.ToolRegistry, call ollama.ToolCall, traceHooks *tracing.TraceHooks, reporter *apperrors.Reporter) string {

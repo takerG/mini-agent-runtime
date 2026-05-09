@@ -3,12 +3,11 @@ package planner
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
-	"net/http"
 	"strings"
 
 	apperrors "mini-agent-runtime/internal/errors"
+	modelclient "mini-agent-runtime/internal/model"
 	"mini-agent-runtime/internal/ollama"
 )
 
@@ -23,22 +22,15 @@ type Step struct {
 }
 
 type Planner struct {
-	endpoint string
-	model    string
-	think    bool
-	client   *http.Client
+	modelClient *modelclient.Client
 }
 
-func NewPlanner(endpoint string, model string, think bool, client *http.Client) *Planner {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	return &Planner{
-		endpoint: endpoint,
-		model:    model,
-		think:    think,
-		client:   client,
-	}
+type Options struct {
+	ModelClient *modelclient.Client
+}
+
+func NewPlanner(options Options) *Planner {
+	return &Planner{modelClient: options.ModelClient}
 }
 
 func (p *Planner) Plan(userMessage string) (Plan, error) {
@@ -50,26 +42,16 @@ func (p *Planner) PlanWithContext(ctx context.Context, userMessage string) (Plan
 		{Role: "system", Content: plannerSystemPrompt()},
 		{Role: "user", Content: userMessage},
 	}
-	req, err := ollama.NewChatRequestWithMessagesThinkAndContext(ctx, p.endpoint, p.model, messages, &p.think)
-	if err != nil {
-		return Plan{}, apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeRequestBuildFailed, err, "build planner request")
-	}
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return Plan{}, apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeModelRequestFailed, err, "post planner request")
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return Plan{}, apperrors.New(apperrors.NodeAgentLoop, apperrors.CodeUpstreamStatusFailed, fmt.Sprintf("planner request failed: %s", resp.Status))
-	}
-
-	content, err := ollama.StreamChatContentAndCapture(resp.Body, io.Discard)
+	result, err := p.modelClient.Chat(ctx, modelclient.ChatOptions{
+		Phase:     "planner",
+		ToolRound: 0,
+		Messages:  messages,
+		Stream:    ollama.StreamOptions{Writer: io.Discard},
+	})
 	if err != nil {
 		return Plan{}, apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeModelRequestFailed, err, "stream planner response")
 	}
-	plan, err := ParsePlan(content)
+	plan, err := ParsePlan(result.Content)
 	if err != nil {
 		return Plan{}, err
 	}

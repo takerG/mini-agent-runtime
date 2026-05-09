@@ -1,8 +1,11 @@
 package trace
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+
+	"mini-agent-runtime/internal/ollama"
 )
 
 type TraceEventName string
@@ -66,14 +69,15 @@ type TurnInputTrace struct {
 
 type ModelRequestTrace struct {
 	ToolRound int
-	Messages  int
-	Tools     int
+	Phase     string
+	Request   ollama.ChatRequest
 }
 
 type ModelResponseTrace struct {
-	ToolRound    int
-	ContentChars int
-	ToolCalls    int
+	ToolRound int
+	Phase     string
+	Content   string
+	ToolCalls []ollama.ToolCall
 }
 
 type ToolCallTrace struct {
@@ -92,6 +96,7 @@ type ToolErrorTrace struct {
 }
 
 type PlannerRequestTrace struct {
+	Message      string
 	MessageChars int
 }
 
@@ -211,9 +216,16 @@ func formatTraceData(data any) string {
 	case TurnInputTrace:
 		return fmt.Sprintf("message=%q history_messages=%d", value.Message, value.HistoryMessages)
 	case ModelRequestTrace:
-		return fmt.Sprintf("tool_round=%d messages=%d tools=%d", value.ToolRound, value.Messages, value.Tools)
+		return fmt.Sprintf("phase=%s tool_round=%d request=%s", value.Phase, value.ToolRound, formatTraceJSON(value.Request))
 	case ModelResponseTrace:
-		return fmt.Sprintf("tool_round=%d content_chars=%d tool_calls=%d", value.ToolRound, value.ContentChars, value.ToolCalls)
+		response := struct {
+			Content   string            `json:"content"`
+			ToolCalls []ollama.ToolCall `json:"tool_calls,omitempty"`
+		}{
+			Content:   value.Content,
+			ToolCalls: value.ToolCalls,
+		}
+		return fmt.Sprintf("phase=%s tool_round=%d response=%s", value.Phase, value.ToolRound, formatTraceJSON(response))
 	case ToolCallTrace:
 		return fmt.Sprintf("name=%s arguments=%v", value.Name, value.Arguments)
 	case ToolResultTrace:
@@ -221,7 +233,7 @@ func formatTraceData(data any) string {
 	case ToolErrorTrace:
 		return fmt.Sprintf("name=%s error=%v", value.Name, value.Error)
 	case PlannerRequestTrace:
-		return fmt.Sprintf("message_chars=%d", value.MessageChars)
+		return fmt.Sprintf("message=%q message_chars=%d", value.Message, value.MessageChars)
 	case PlannerResponseTrace:
 		return fmt.Sprintf("goal=%q steps=%d", value.Goal, value.Steps)
 	case ExecutorStartTrace:
@@ -235,4 +247,12 @@ func formatTraceData(data any) string {
 	default:
 		return fmt.Sprintf("%v", data)
 	}
+}
+
+func formatTraceJSON(value any) string {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("%v", value)
+	}
+	return string(data)
 }

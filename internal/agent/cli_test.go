@@ -8,7 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	modelclient "mini-agent-runtime/internal/model"
 	"mini-agent-runtime/internal/ollama"
+	"mini-agent-runtime/internal/tools"
+	tracing "mini-agent-runtime/internal/trace"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -604,5 +607,77 @@ func TestRunChatLoopPlannerExecutorModePlansThenExecutesWithTools(t *testing.T) 
 	}, "\n")
 	if got := stdout.String(); got != wantOutput {
 		t.Fatalf("stdout = %q, want %q", got, wantOutput)
+	}
+}
+
+func TestRuntimeRunsPlannerExecutorTurnWithSharedDependencies(t *testing.T) {
+	var requests []ollama.ChatRequest
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			var body ollama.ChatRequest
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatalf("decode upstream request body: %v", err)
+			}
+			requests = append(requests, body)
+
+			switch len(requests) {
+			case 1:
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     make(http.Header),
+					Body: io.NopCloser(strings.NewReader(
+						`{"message":{"content":"{\"goal\":\"answer calculation\",\"steps\":[{\"task\":\"calculate 23*19\",\"tool_hint\":\"calculator\"}]}"}}` + "\n" +
+							`{"done":true}` + "\n",
+					)),
+				}, nil
+			case 2:
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     make(http.Header),
+					Body: io.NopCloser(strings.NewReader(
+						`{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"calculator","arguments":{"op":"*","a":23,"b":19}}}]},"done":true}` + "\n",
+					)),
+				}, nil
+			default:
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     make(http.Header),
+					Body: io.NopCloser(strings.NewReader(
+						`{"message":{"content":"23*19=437"}}` + "\n" +
+							`{"done":true}` + "\n",
+					)),
+				}, nil
+			}
+		}),
+	}
+
+	var stdout strings.Builder
+	runtime := NewRuntime(RuntimeOptions{
+		ModelClient: modelclient.NewClient(modelclient.Options{
+			Endpoint: "http://localhost:11434/api/chat",
+			Model:    "qwen3:4b",
+			Think:    true,
+			HTTP:     client,
+		}),
+		Tools:  tools.NewDefaultToolRegistry(nil),
+		Trace:  tracing.NewTraceHooks(nil),
+		Stdout: &stdout,
+	})
+
+	answer, err := runtime.RunPlannerExecutorTurn(t.Context(), "23 * 19?")
+	if err != nil {
+		t.Fatalf("RunPlannerExecutorTurn returned error: %v", err)
+	}
+	if got, want := answer, "23*19=437"; got != want {
+		t.Fatalf("answer = %q, want %q", got, want)
+	}
+	if got, want := len(requests), 3; got != want {
+		t.Fatalf("request count = %d, want %d", got, want)
+	}
+	if got := stdout.String(); !strings.Contains(got, "[plan]") || !strings.Contains(got, "23*19=437") {
+		t.Fatalf("stdout = %q, want visible process and final answer", got)
 	}
 }

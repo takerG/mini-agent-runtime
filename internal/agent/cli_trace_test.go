@@ -81,6 +81,24 @@ func TestRunChatLoopWithTraceLogsAgentToolFlow(t *testing.T) {
 			t.Fatalf("trace events missing %q in %#v", want, gotNames)
 		}
 	}
+
+	requestTrace, ok := firstTraceData[tracing.ModelRequestTrace](sink.events, tracing.TraceModelRequest)
+	if !ok {
+		t.Fatal("missing first model request trace data")
+	}
+	if got := requestTrace.Request.Messages[0].Content; !strings.Contains(got, "2+3") {
+		t.Fatalf("request trace user content = %q, want to contain 2+3", got)
+	}
+	responseTrace, ok := firstTraceData[tracing.ModelResponseTrace](sink.events, tracing.TraceModelResponse)
+	if !ok {
+		t.Fatal("missing first model response trace data")
+	}
+	if got, want := len(responseTrace.ToolCalls), 1; got != want {
+		t.Fatalf("response trace tool call count = %d, want %d", got, want)
+	}
+	if got, want := responseTrace.ToolCalls[0].Function.Name, "calculator"; got != want {
+		t.Fatalf("response trace tool call name = %q, want %q", got, want)
+	}
 }
 
 func TestRunChatLoopWithTraceLogsPlannerExecutorFlow(t *testing.T) {
@@ -160,6 +178,21 @@ func traceNamesContain(names []tracing.TraceEventName, want tracing.TraceEventNa
 		}
 	}
 	return false
+}
+
+func firstTraceData[T any](events []tracing.TraceEvent, name tracing.TraceEventName) (T, bool) {
+	var zero T
+	for _, event := range events {
+		if event.Name != name {
+			continue
+		}
+		data, ok := event.Data.(T)
+		if !ok {
+			return zero, false
+		}
+		return data, true
+	}
+	return zero, false
 }
 
 type recordingTraceSink struct {

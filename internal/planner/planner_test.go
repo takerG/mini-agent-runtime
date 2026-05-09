@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	modelclient "mini-agent-runtime/internal/model"
 	"mini-agent-runtime/internal/ollama"
 )
 
@@ -35,7 +36,14 @@ func TestPlannerGeneratesPlanFromModelJSON(t *testing.T) {
 		}),
 	}
 
-	planner := NewPlanner("http://localhost:11434/api/chat", "qwen3:4b", true, client)
+	planner := NewPlanner(Options{
+		ModelClient: modelclient.NewClient(modelclient.Options{
+			Endpoint: "http://localhost:11434/api/chat",
+			Model:    "qwen3:4b",
+			Think:    true,
+			HTTP:     client,
+		}),
+	})
 	plan, err := planner.Plan("what time is it and what is 23*19?")
 	if err != nil {
 		t.Fatalf("Plan returned error: %v", err)

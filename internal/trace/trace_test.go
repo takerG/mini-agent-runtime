@@ -3,6 +3,8 @@ package trace
 import (
 	"strings"
 	"testing"
+
+	"mini-agent-runtime/internal/ollama"
 )
 
 func TestTraceLoggerWritesOnlyWhenEnabled(t *testing.T) {
@@ -44,6 +46,61 @@ func TestTraceHooksEmitStructuredEventsToSink(t *testing.T) {
 	}
 	if got, want := sink.events[1].Name, TraceToolResult; got != want {
 		t.Fatalf("second event name = %q, want %q", got, want)
+	}
+}
+
+func TestTraceLoggerIncludesFullModelRequestAndResponse(t *testing.T) {
+	var output strings.Builder
+	logger := NewTraceLogger(true, &output)
+	think := true
+
+	logger.Emit(TraceEvent{
+		Name: TraceModelRequest,
+		Data: ModelRequestTrace{
+			Phase:     "chat",
+			ToolRound: 1,
+			Request: ollama.ChatRequest{
+				Model:  "qwen3:4b",
+				Stream: true,
+				Think:  &think,
+				Messages: []ollama.Message{
+					{Role: "user", Content: "2+3 等于多少？"},
+				},
+				Tools: []ollama.ToolDefinition{
+					{
+						Type: "function",
+						Function: ollama.ToolDescription{
+							Name:        "calculator",
+							Description: "run calculation",
+						},
+					},
+				},
+			},
+		},
+	})
+	logger.Emit(TraceEvent{
+		Name: TraceModelResponse,
+		Data: ModelResponseTrace{
+			Phase:     "chat",
+			ToolRound: 1,
+			Content:   "2+3=5",
+			ToolCalls: []ollama.ToolCall{
+				{Function: ollama.ToolFunctionCall{Name: "calculator", Arguments: map[string]any{"a": 2, "b": 3, "op": "+"}}},
+			},
+		},
+	})
+
+	got := output.String()
+	for _, want := range []string{
+		`"model": "qwen3:4b"`,
+		`"content": "2+3 等于多少？"`,
+		`"name": "calculator"`,
+		`"content": "2+3=5"`,
+		`"tool_calls"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("trace output = %q, want to contain %s", got, want)
+		}
 	}
 }
 

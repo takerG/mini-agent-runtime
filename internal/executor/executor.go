@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 
 	apperrors "mini-agent-runtime/internal/errors"
+	modelclient "mini-agent-runtime/internal/model"
 	"mini-agent-runtime/internal/ollama"
 	"mini-agent-runtime/internal/planner"
 	"mini-agent-runtime/internal/tools"
@@ -18,10 +18,7 @@ import (
 const maxToolRounds = 4
 
 type Options struct {
-	Endpoint    string
-	Model       string
-	Think       bool
-	Client      *http.Client
+	ModelClient *modelclient.Client
 	Registry    *tools.ToolRegistry
 	Trace       *tracing.TraceHooks
 	Reporter    *apperrors.Reporter
@@ -30,10 +27,7 @@ type Options struct {
 }
 
 type Executor struct {
-	endpoint    string
-	model       string
-	think       bool
-	client      *http.Client
+	modelClient *modelclient.Client
 	registry    *tools.ToolRegistry
 	trace       *tracing.TraceHooks
 	reporter    *apperrors.Reporter
@@ -42,10 +36,6 @@ type Executor struct {
 }
 
 func NewExecutor(options Options) *Executor {
-	client := options.Client
-	if client == nil {
-		client = http.DefaultClient
-	}
 	stdout := options.Stdout
 	if stdout == nil {
 		stdout = io.Discard
@@ -60,10 +50,7 @@ func NewExecutor(options Options) *Executor {
 	}
 
 	return &Executor{
-		endpoint:    options.Endpoint,
-		model:       options.Model,
-		think:       options.Think,
-		client:      client,
+		modelClient: options.ModelClient,
 		registry:    options.Registry,
 		trace:       traceHooks,
 		reporter:    reporter,
@@ -98,21 +85,6 @@ func (e *Executor) Execute(ctx context.Context, userMessage string, plan planner
 			return "", apperrors.New(apperrors.NodeAgentLoop, apperrors.CodeConversationLimit, "too many executor tool calls")
 		}
 
-		req, err := ollama.NewChatRequestWithMessagesThinkToolsAndContext(ctx, e.endpoint, e.model, messages, &e.think, e.registry.Definitions())
-		if err != nil {
-			return "", apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeRequestBuildFailed, err, "build executor request")
-		}
-		e.trace.ModelRequest(tracing.ModelRequestTrace{ToolRound: toolRound, Messages: len(messages), Tools: len(e.registry.Definitions())})
-
-		resp, err := e.client.Do(req)
-		if err != nil {
-			return "", apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeModelRequestFailed, err, "post executor request")
-		}
-		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			resp.Body.Close()
-			return "", apperrors.New(apperrors.NodeAgentLoop, apperrors.CodeUpstreamStatusFailed, fmt.Sprintf("executor request failed: %s", resp.Status))
-		}
-
 		processPrinted := false
 		streamOptions := ollama.StreamOptions{Writer: e.stdout}
 		if e.showProcess {
@@ -123,15 +95,18 @@ func (e *Executor) Execute(ctx context.Context, userMessage string, plan planner
 			}
 		}
 
-		assistantMessage, toolCalls, streamErr := ollama.StreamChatMessageAndCaptureWithOptions(resp.Body, streamOptions)
-		closeErr := resp.Body.Close()
-		if streamErr != nil {
-			return "", apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeModelRequestFailed, streamErr, "stream executor response")
+		result, err := e.modelClient.Chat(ctx, modelclient.ChatOptions{
+			Phase:     "executor",
+			ToolRound: toolRound,
+			Messages:  messages,
+			Tools:     e.registry.Definitions(),
+			Stream:    streamOptions,
+		})
+		if err != nil {
+			return "", err
 		}
-		if closeErr != nil {
-			return "", apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeResponseCloseFailed, closeErr, "close executor response")
-		}
-		e.trace.ModelResponse(tracing.ModelResponseTrace{ToolRound: toolRound, ContentChars: len([]rune(assistantMessage)), ToolCalls: len(toolCalls)})
+		assistantMessage := result.Content
+		toolCalls := result.ToolCalls
 
 		if len(toolCalls) == 0 {
 			if e.showProcess && !processPrinted {

@@ -7,7 +7,7 @@ A minimal Go agent runtime for streaming multi-turn chat from a local Ollama-com
 Start an interactive multi-turn chat:
 
 ```powershell
-go run . -model llama3.2
+go run . --model llama3.2
 ```
 
 Use `go run .` from the project directory. The root package now keeps only `main.go`; all agent components live under `internal/`.
@@ -17,49 +17,49 @@ Then type one message per line. Use `/exit`, `/quit`, `exit`, or `quit` to leave
 You can also pass the first message as command arguments. After the first response, the CLI continues reading follow-up messages:
 
 ```powershell
-go run . -model llama3.2 "介绍一下你自己"
+go run . --model llama3.2 "介绍一下你自己"
 ```
 
 Defaults:
 
 - API URL: `http://localhost:11434/api/chat`
 - Model: `qwen3:4b`
-- Think output: hidden by default with `-think=true`
+- Think output: hidden by default with `--think=true`
 
 You can override defaults with flags:
 
 ```powershell
-go run . -url http://localhost:11434/api/chat -model qwen2.5 "你好"
+go run . --url http://localhost:11434/api/chat --model qwen2.5 "你好"
 ```
 
-For thinking models such as Qwen3, use `-think=false` when you want to show the think stream:
+For thinking models such as Qwen3, use `--think=false` when you want to show the think stream:
 
 ```powershell
-go run . -model qwen3:4b -think=false
+go run . --model qwen3:4b --think=false
 ```
 
 Enable trace logs when you want to see what the agent is doing at each step:
 
 ```powershell
-go run . -model qwen3:4b -trace
+go run . --model qwen3:4b --trace
 ```
 
-Trace logs are written to stderr and include user turns, model requests, model responses, tool calls, tool results, and final answers. This is useful for debugging and interview demos.
+Trace logs are written to stderr and include user turns, full model request payloads, full model response content/tool calls, tool calls, tool results, and final answers. This is useful for debugging and interview demos.
 
 Internally, trace uses structured hooks. The default CLI sink formats those events as stderr logs, and future sinks can reuse the same events for files, metrics, or UI panels.
 
 Enable debug error output when you want structured error details on stderr:
 
 ```powershell
-go run . -model qwen3:4b -debug "23 / 0 等于多少？"
+go run . --model qwen3:4b --debug "23 / 0 等于多少？"
 ```
 
-Debug output is controlled by `-debug`. It includes stable error codes, the origin node where the error happened, and the node chain that shows how the error traveled through the runtime.
+Debug output is controlled by `--debug`. It includes stable error codes, the origin node where the error happened, and the node chain that shows how the error traveled through the runtime.
 
 Enable planner/executor mode when you want the runtime to plan first, then execute the plan with native tool calls:
 
 ```powershell
-go run . -mode plan "现在几点？顺便算一下 23 * 19"
+go run . --mode plan "现在几点？顺便算一下 23 * 19"
 ```
 
 In `plan` mode the CLI prints the full process:
@@ -112,7 +112,7 @@ go run . "你好"
 Start a small HTTP server that streams model chunks to the client as soon as they arrive:
 
 ```powershell
-go run . -serve 127.0.0.1:8080 -model qwen2.5
+go run . --serve 127.0.0.1:8080 --model qwen2.5
 ```
 
 Call it with JSON:
@@ -130,10 +130,11 @@ The server posts to `http://localhost:11434/api/chat` with `stream: true`, reads
 The entrypoint is intentionally thin:
 
 - `main.go`: parses flags, chooses CLI or HTTP server mode, wires components together.
-- `internal/agent`: owns the multi-turn CLI loop, tool-call rounds, history, and tool error feedback.
+- `internal/agent`: owns the multi-turn CLI loop, runtime dependency wiring, tool-call rounds, history, and tool error feedback.
+- `internal/model`: owns shared model invocation, request/response trace events, HTTP status handling, and stream capture.
 - `internal/planner`: asks the model for a structured JSON plan before execution.
 - `internal/executor`: follows a plan, reuses native tool calls, and streams the final answer.
-- `internal/ollama`: owns Ollama-compatible request payloads and streaming NDJSON parsing.
+- `internal/ollama`: owns Ollama-compatible protocol types, request payload construction, and streaming NDJSON parsing.
 - `internal/tools`: owns `Tool`, `ToolRegistry`, built-in tools, and tool argument validation.
 - `internal/trace`: owns structured trace events, hooks, and the stderr logger sink.
 - `internal/errors`: owns error codes, runtime nodes, model-friendly error formatting, operator logs, and debug output.

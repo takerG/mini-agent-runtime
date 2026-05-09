@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	modelclient "mini-agent-runtime/internal/model"
 	"mini-agent-runtime/internal/ollama"
 	"mini-agent-runtime/internal/planner"
 	"mini-agent-runtime/internal/tools"
@@ -56,10 +57,12 @@ func TestExecutorRunsPlanWithNativeToolCalls(t *testing.T) {
 
 	var stdout strings.Builder
 	executor := NewExecutor(Options{
-		Endpoint: "http://localhost:11434/api/chat",
-		Model:    "qwen3:4b",
-		Think:    true,
-		Client:   client,
+		ModelClient: modelclient.NewClient(modelclient.Options{
+			Endpoint: "http://localhost:11434/api/chat",
+			Model:    "qwen3:4b",
+			Think:    true,
+			HTTP:     client,
+		}),
 		Registry: tools.NewDefaultToolRegistry(time.Now),
 		Trace:    tracing.NewTraceHooks(nil),
 		Stdout:   &stdout,
@@ -134,10 +137,12 @@ func TestExecutorCanPrintVisiblePlanObservationsAndFinalAnswer(t *testing.T) {
 
 	var stdout strings.Builder
 	executor := NewExecutor(Options{
-		Endpoint: "http://localhost:11434/api/chat",
-		Model:    "qwen3:4b",
-		Think:    true,
-		Client:   client,
+		ModelClient: modelclient.NewClient(modelclient.Options{
+			Endpoint: "http://localhost:11434/api/chat",
+			Model:    "qwen3:4b",
+			Think:    true,
+			HTTP:     client,
+		}),
 		Registry: tools.NewDefaultToolRegistry(func() time.Time {
 			return time.Date(2026, 5, 8, 20, 51, 42, 0, time.FixedZone("CST", 8*60*60))
 		}),
@@ -219,10 +224,12 @@ func TestExecutorAggregatesVisibleProcessAcrossToolRounds(t *testing.T) {
 
 	var stdout strings.Builder
 	executor := NewExecutor(Options{
-		Endpoint: "http://localhost:11434/api/chat",
-		Model:    "qwen3:4b",
-		Think:    true,
-		Client:   client,
+		ModelClient: modelclient.NewClient(modelclient.Options{
+			Endpoint: "http://localhost:11434/api/chat",
+			Model:    "qwen3:4b",
+			Think:    true,
+			HTTP:     client,
+		}),
 		Registry: tools.NewDefaultToolRegistry(func() time.Time {
 			return time.Date(2026, 5, 8, 20, 51, 42, 0, time.FixedZone("CST", 8*60*60))
 		}),
