@@ -158,6 +158,8 @@ This layout keeps provider protocol, tool execution, tracing, runtime orchestrat
 
 ## Development
 
+Project constraints are captured in `docs/specs/project-constraints.md`. Read that spec before changing code structure, CLI behavior, tools, trace, errors, comments, or line endings.
+
 ```powershell
 $env:GOCACHE = "D:\work\mini-agent-runtime\.gocache"
 go test ./...

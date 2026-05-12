@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	apperrors "mini-agent-runtime/internal/errors"
@@ -87,12 +88,14 @@ type strictObservation struct {
 // RunStrictPlannerExecutorTurn 执行 Strict Planner/Executor 流程，由 Go 解析计划并直接调用工具。
 func (r *Runtime) RunStrictPlannerExecutorTurn(ctx context.Context, userMessage string) (string, error) {
 	r.trace.PlannerRequest(tracing.PlannerRequestTrace{Message: userMessage, MessageChars: len([]rune(userMessage))})
+	toolDefinitions := r.tools.Definitions()
 	planResult, err := r.modelClient.Chat(ctx, modelclient.ChatOptions{
 		Phase: "strict_planner",
 		Messages: []ollama.Message{
 			{Role: "system", Content: strictPlannerSystemPrompt()},
 			{Role: "user", Content: userMessage},
 		},
+		Tools:  toolDefinitions,
 		Stream: ollama.StreamOptions{Writer: io.Discard},
 	})
 	if err != nil {
@@ -157,7 +160,57 @@ func (r *Runtime) printStrictProcess(plan planner.ExecutablePlan, observations [
 
 // strictPlannerSystemPrompt 返回要求模型只生成可执行 JSON 计划的系统提示词。
 func strictPlannerSystemPrompt() string {
-	return "You are the strict planner in an agent runtime. Return only executable JSON with this shape: {\"goal\":\"short goal\",\"steps\":[{\"type\":\"tool_call\",\"tool_name\":\"calculator\",\"arguments\":{\"a\":23,\"b\":19,\"op\":\"*\"}}]}. Every required external fact or calculation must become a tool_call. Use current_time for current date/time questions. Use calculator for arithmetic. Available tools are current_time and calculator. Do not answer the user directly. Do not call tools yourself."
+	prompt := `
+你是一个 agent runtime 中的严格规划器 strict planner。
+
+你的唯一职责是：根据 runtime 提供的用户请求、tools 工具清单和上下文，生成一个可以被程序执行的 JSON 计划。
+
+你不能直接回答用户问题。
+你不能调用工具。
+你不能解释你的思考过程。
+你不能输出 Markdown。
+你不能输出 JSON 之外的任何文本。
+
+你必须只返回合法 JSON，格式如下：
+
+{
+  "goal": "简短描述本次任务目标",
+  "steps": [
+    {
+      "id": "step1",
+      "type": "tool_call",
+      "tool_name": "工具名称",
+      "arguments": {}
+    }
+  ]
+}
+
+请求中会包含 tools 字段，表示当前 runtime 允许使用的工具。
+
+规划规则：
+
+1. 只能使用 tools 中声明的工具。
+2. 绝对不能编造不存在的工具。
+3. 每个 tool_call 的 tool_name 必须严格等于 tools 中某个工具的 function.name。
+4. 每个 tool_call 的 arguments 必须符合该工具在 tools 中声明的 function.parameters 参数结构。
+5. 所有必须依赖外部能力完成的事情，都必须规划成 tool_call。
+6. 不要自己计算、查询、推测或编造工具结果。
+7. 计划中不能包含工具执行结果，因为工具还没有被执行。
+8. 如果某一步依赖前一步结果，使用 "$step_id.result" 的形式引用。
+9. steps 必须按照执行顺序排列。
+10. 不要生成最终回答步骤，最终回答由 executor 或 responder 在工具执行完成后负责。
+11. 如果用户请求可以完全通过可用工具完成，则生成完整步骤。
+12. 如果用户请求中只有一部分可以通过可用工具完成，只规划可执行部分，不要编造工具。
+13. 如果用户请求完全无法通过 tools 完成，返回：
+
+{
+  "goal": "unsupported request",
+  "steps": []
+}
+
+14. 输出必须可以被 JSON.parse 直接解析。
+`
+	return strings.TrimSpace(prompt)
 }
 
 // strictSummarySystemPrompt 根据已执行计划和观测结果生成最终总结阶段的系统提示词。
@@ -173,7 +226,25 @@ func strictSummarySystemPrompt(plan planner.ExecutablePlan, observations []stric
 	if err != nil {
 		data = []byte(fmt.Sprintf(`{"goal":%q}`, plan.Goal))
 	}
-	return "You are the final responder in a strict planner/executor agent runtime. The Go runtime already executed every planned tool call. Use only the observations to answer the user concisely in the user's language. Do not invent missing observations. Do not call tools. Plan and observations:\n" + string(data)
+	prompt := `
+你是 strict planner/executor runtime 中的最终回答器 responder。
+
+runtime 已经完成了 strict planner 生成的计划，并执行了所有可执行工具调用。
+
+你的职责是：根据用户原始请求、已执行计划和 observations，生成最终面向用户的自然语言回答。
+
+回答规则：
+
+1. 只能基于 runtime 已执行完成的 plan 和 observations 回答用户。
+2. 不要编造 observations 中不存在的结果。
+3. 不要调用工具。
+4. 不要输出新的计划。
+5. 不要输出 Markdown。
+6. 如果 observations 中包含工具错误，直接用用户能理解的方式解释限制或失败原因。
+7. 使用用户问题所使用的语言回答。
+8. 回答应简洁、明确。
+`
+	return strings.TrimSpace(prompt) + "\n\nruntime_context:\n" + string(data)
 }
 
 // formatArguments 将工具参数格式化成紧凑 JSON，便于在 CLI 过程输出中展示。

@@ -34,6 +34,9 @@ func ParseExecutablePlan(content string) (ExecutablePlan, error) {
 		plan.Goal = "answer user request"
 	}
 	if len(plan.Steps) == 0 {
+		if plan.Goal == "unsupported request" {
+			return plan, nil
+		}
 		return ExecutablePlan{}, apperrors.New(apperrors.NodeAgentLoop, apperrors.CodeModelRequestFailed, "executable plan has no steps")
 	}
 	for i := range plan.Steps {

@@ -39,3 +39,17 @@ func TestParseExecutablePlanRejectsMissingToolName(t *testing.T) {
 		t.Fatal("ParseExecutablePlan returned nil error, want missing tool name error")
 	}
 }
+
+// TestParseExecutablePlanAllowsUnsupportedRequest 验证 unsupported request 可以返回空执行步骤。
+func TestParseExecutablePlanAllowsUnsupportedRequest(t *testing.T) {
+	plan, err := ParseExecutablePlan(`{"goal":"unsupported request","steps":[]}`)
+	if err != nil {
+		t.Fatalf("ParseExecutablePlan returned error: %v", err)
+	}
+	if got, want := plan.Goal, "unsupported request"; got != want {
+		t.Fatalf("goal = %q, want %q", got, want)
+	}
+	if got, want := len(plan.Steps), 0; got != want {
+		t.Fatalf("step count = %d, want %d", got, want)
+	}
+}

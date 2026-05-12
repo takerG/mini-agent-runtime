@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -21,6 +22,44 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 // RoundTrip 让测试可以用函数模拟 http.RoundTripper。
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
+}
+
+type strictPlannerTestTool struct{}
+
+// Name 返回 strict planner 测试工具的注册名称。
+func (strictPlannerTestTool) Name() string {
+	return "mock_metric_query"
+}
+
+// Description 返回 strict planner 测试工具的模型可见说明。
+func (strictPlannerTestTool) Description() string {
+	return "query a mock metric value for strict planner tests"
+}
+
+// Definition 返回 strict planner 测试工具的 function calling 定义。
+func (t strictPlannerTestTool) Definition() ollama.ToolDefinition {
+	return ollama.ToolDefinition{
+		Type: "function",
+		Function: ollama.ToolDescription{
+			Name:        t.Name(),
+			Description: t.Description(),
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": "metric name",
+					},
+				},
+				"required": []string{"name"},
+			},
+		},
+	}
+}
+
+// Execute 返回 strict planner 测试工具的固定观测结果。
+func (strictPlannerTestTool) Execute(context.Context, map[string]any) (string, error) {
+	return "metric=42", nil
 }
 
 // TestRunChatLoopSendsConversationHistoryAcrossTurns 验证多轮 CLI 会把历史消息继续传给模型。
@@ -678,7 +717,7 @@ func TestRunChatLoopStrictPlannerExecutorModeExecutesToolsInGo(t *testing.T) {
 	if got, want := len(requests), 2; got != want {
 		t.Fatalf("request count = %d, want %d", got, want)
 	}
-	if got, want := len(requests[0].Tools), 0; got != want {
+	if got, want := len(requests[0].Tools), 2; got != want {
 		t.Fatalf("planner request tool count = %d, want %d", got, want)
 	}
 	if got, want := len(requests[1].Tools), 0; got != want {
@@ -824,7 +863,7 @@ func TestRuntimeRunsStrictPlannerExecutorTurnWithoutModelToolCalls(t *testing.T)
 	if got, want := len(requests), 2; got != want {
 		t.Fatalf("request count = %d, want %d", got, want)
 	}
-	if got, want := len(requests[0].Tools), 0; got != want {
+	if got, want := len(requests[0].Tools), 2; got != want {
 		t.Fatalf("strict planner request tool count = %d, want %d", got, want)
 	}
 	if got, want := len(requests[1].Tools), 0; got != want {
@@ -848,6 +887,96 @@ func TestRuntimeRunsStrictPlannerExecutorTurnWithoutModelToolCalls(t *testing.T)
 	}, "\n")
 	if got := stdout.String(); got != wantOutput {
 		t.Fatalf("stdout = %q, want %q", got, wantOutput)
+	}
+}
+
+// TestRuntimeStrictPlannerPassesRegisteredToolsToPlanner 验证 strict planner 请求会使用注册表中的动态工具定义。
+func TestRuntimeStrictPlannerPassesRegisteredToolsToPlanner(t *testing.T) {
+	var requests []ollama.ChatRequest
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			var body ollama.ChatRequest
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatalf("decode upstream request body: %v", err)
+			}
+			requests = append(requests, body)
+
+			if len(requests) == 1 {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     make(http.Header),
+					Body: io.NopCloser(strings.NewReader(
+						`{"message":{"content":"{\"goal\":\"query metric\",\"steps\":[{\"type\":\"tool_call\",\"tool_name\":\"mock_metric_query\",\"arguments\":{\"name\":\"latency\"}}]}"}}` + "\n" +
+							`{"done":true}` + "\n",
+					)),
+				}, nil
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body: io.NopCloser(strings.NewReader(
+					`{"message":{"content":"metric=42"}}` + "\n" +
+						`{"done":true}` + "\n",
+				)),
+			}, nil
+		}),
+	}
+
+	registry := tools.NewToolRegistry()
+	registry.Register(strictPlannerTestTool{})
+
+	var stdout strings.Builder
+	runtime := NewRuntime(RuntimeOptions{
+		ModelClient: modelclient.NewClient(modelclient.Options{
+			Endpoint: "http://localhost:11434/api/chat",
+			Model:    "qwen3:4b",
+			Think:    true,
+			HTTP:     client,
+		}),
+		Tools:  registry,
+		Trace:  tracing.NewTraceHooks(nil),
+		Stdout: &stdout,
+	})
+
+	answer, err := runtime.RunStrictPlannerExecutorTurn(t.Context(), "query latency metric")
+	if err != nil {
+		t.Fatalf("RunStrictPlannerExecutorTurn returned error: %v", err)
+	}
+
+	if got, want := answer, "metric=42"; got != want {
+		t.Fatalf("answer = %q, want %q", got, want)
+	}
+	if got, want := len(requests), 2; got != want {
+		t.Fatalf("request count = %d, want %d", got, want)
+	}
+	if got, want := len(requests[0].Tools), 1; got != want {
+		t.Fatalf("strict planner request tool count = %d, want %d", got, want)
+	}
+	if got, want := requests[0].Tools[0].Function.Name, "mock_metric_query"; got != want {
+		t.Fatalf("strict planner tool name = %q, want %q", got, want)
+	}
+	if got, want := requests[0].Messages[1].Content, "query latency metric"; got != want {
+		t.Fatalf("strict planner user message = %q, want %q", got, want)
+	}
+	for _, forbidden := range []string{"available_tools", "mock_metric_query", "parameters"} {
+		if strings.Contains(requests[0].Messages[1].Content, forbidden) {
+			t.Fatalf("strict planner user message = %q, must not duplicate tool schema %q", requests[0].Messages[1].Content, forbidden)
+		}
+	}
+	plannerPrompt := requests[0].Messages[0].Content
+	for _, forbidden := range []string{"Use current_time", "Use calculator", "Available tools are current_time and calculator", "available_tools"} {
+		if strings.Contains(plannerPrompt, forbidden) {
+			t.Fatalf("strict planner prompt = %q, must not contain hard-coded tool hint %q", plannerPrompt, forbidden)
+		}
+	}
+	if got, want := len(requests[1].Tools), 0; got != want {
+		t.Fatalf("strict summary request tool count = %d, want %d", got, want)
+	}
+	if !strings.Contains(stdout.String(), "mock_metric_query -> metric=42") {
+		t.Fatalf("stdout = %q, want dynamic tool observation", stdout.String())
 	}
 }
 
@@ -915,12 +1044,20 @@ func TestRuntimeStrictPlannerExecutorFeedsToolErrorsIntoObservations(t *testing.
 func TestStrictPromptsRequireCompleteToolPlanAndNoInventedObservations(t *testing.T) {
 	plannerPrompt := strictPlannerSystemPrompt()
 	for _, want := range []string{
-		"Every required external fact or calculation must become a tool_call",
-		"Use current_time",
-		"Use calculator",
+		"你是一个 agent runtime 中的严格规划器 strict planner",
+		"你不能直接回答用户问题",
+		"请求中会包含 tools 字段",
+		"只能使用 tools 中声明的工具",
+		"如果用户请求完全无法通过 tools 完成",
+		"输出必须可以被 JSON.parse 直接解析",
 	} {
 		if !strings.Contains(plannerPrompt, want) {
 			t.Fatalf("strict planner prompt = %q, want substring %q", plannerPrompt, want)
+		}
+	}
+	for _, forbidden := range []string{"Use current_time", "Use calculator", "Available tools are current_time and calculator", "available_tools"} {
+		if strings.Contains(plannerPrompt, forbidden) {
+			t.Fatalf("strict planner prompt = %q, must not contain hard-coded tool hint %q", plannerPrompt, forbidden)
 		}
 	}
 
@@ -930,7 +1067,15 @@ func TestStrictPromptsRequireCompleteToolPlanAndNoInventedObservations(t *testin
 			{Type: planner.ExecutableStepToolCall, ToolName: "calculator", Arguments: map[string]any{"a": 23, "b": 19, "op": "*"}},
 		},
 	}, []strictObservation{{ToolName: "calculator", Result: "437"}})
-	if !strings.Contains(summaryPrompt, "Do not invent missing observations") {
-		t.Fatalf("strict summary prompt = %q, want no-invention instruction", summaryPrompt)
+	for _, want := range []string{
+		"你是 strict planner/executor runtime 中的最终回答器 responder",
+		"只能基于 runtime 已执行完成的 plan 和 observations 回答用户",
+		"不要编造 observations 中不存在的结果",
+		"不要调用工具",
+		"runtime_context",
+	} {
+		if !strings.Contains(summaryPrompt, want) {
+			t.Fatalf("strict summary prompt = %q, want substring %q", summaryPrompt, want)
+		}
 	}
 }
