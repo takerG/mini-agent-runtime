@@ -16,6 +16,7 @@ type ExecutablePlan struct {
 }
 
 type ExecutableStep struct {
+	ID        string         `json:"id"`
 	Type      string         `json:"type"`
 	ToolName  string         `json:"tool_name"`
 	Arguments map[string]any `json:"arguments"`
