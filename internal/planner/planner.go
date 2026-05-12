@@ -29,14 +29,17 @@ type Options struct {
 	ModelClient *modelclient.Client
 }
 
+// NewPlanner 创建 planner 组件，用于把用户目标拆解成执行计划。
 func NewPlanner(options Options) *Planner {
 	return &Planner{modelClient: options.ModelClient}
 }
 
+// Plan 使用默认 context 为用户输入生成自然语言执行计划。
 func (p *Planner) Plan(userMessage string) (Plan, error) {
 	return p.PlanWithContext(context.Background(), userMessage)
 }
 
+// PlanWithContext 调用模型生成 planner JSON，并解析成内部 Plan 结构。
 func (p *Planner) PlanWithContext(ctx context.Context, userMessage string) (Plan, error) {
 	messages := []ollama.Message{
 		{Role: "system", Content: plannerSystemPrompt()},
@@ -58,12 +61,9 @@ func (p *Planner) PlanWithContext(ctx context.Context, userMessage string) (Plan
 	return plan, nil
 }
 
+// ParsePlan 将模型返回的 planner JSON 文本解析成 Plan，并补齐安全默认值。
 func ParsePlan(content string) (Plan, error) {
-	cleaned := strings.TrimSpace(content)
-	cleaned = strings.TrimPrefix(cleaned, "```json")
-	cleaned = strings.TrimPrefix(cleaned, "```")
-	cleaned = strings.TrimSuffix(cleaned, "```")
-	cleaned = strings.TrimSpace(cleaned)
+	cleaned := cleanJSONContent(content)
 
 	var plan Plan
 	if err := json.Unmarshal([]byte(cleaned), &plan); err != nil {
@@ -78,6 +78,7 @@ func ParsePlan(content string) (Plan, error) {
 	return plan, nil
 }
 
+// plannerSystemPrompt 返回自然语言 planner 阶段的系统提示词。
 func plannerSystemPrompt() string {
 	return strings.Join([]string{
 		"You are the planner in a planner/executor agent runtime.",

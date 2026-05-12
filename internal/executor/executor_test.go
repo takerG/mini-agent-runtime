@@ -18,10 +18,12 @@ import (
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
+// RoundTrip 让测试可以用函数模拟 http.RoundTripper。
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
 
+// TestExecutorRunsPlanWithNativeToolCalls 验证 executor 会根据计划驱动模型原生工具调用。
 func TestExecutorRunsPlanWithNativeToolCalls(t *testing.T) {
 	var requests []ollama.ChatRequest
 	client := &http.Client{
@@ -102,6 +104,7 @@ func TestExecutorRunsPlanWithNativeToolCalls(t *testing.T) {
 	}
 }
 
+// TestExecutorCanPrintVisiblePlanObservationsAndFinalAnswer 验证 executor 能输出可见计划、观测和最终回答。
 func TestExecutorCanPrintVisiblePlanObservationsAndFinalAnswer(t *testing.T) {
 	var requests []ollama.ChatRequest
 	client := &http.Client{
@@ -179,6 +182,7 @@ func TestExecutorCanPrintVisiblePlanObservationsAndFinalAnswer(t *testing.T) {
 	}
 }
 
+// TestExecutorAggregatesVisibleProcessAcrossToolRounds 验证多轮工具调用的过程输出会聚合展示。
 func TestExecutorAggregatesVisibleProcessAcrossToolRounds(t *testing.T) {
 	var requests []ollama.ChatRequest
 	client := &http.Client{

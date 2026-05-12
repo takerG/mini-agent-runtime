@@ -13,10 +13,12 @@ import (
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
+// RoundTrip 让测试可以用函数模拟 http.RoundTripper。
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
 
+// TestPlannerGeneratesPlanFromModelJSON 验证 planner 能把模型 JSON 解析成计划。
 func TestPlannerGeneratesPlanFromModelJSON(t *testing.T) {
 	var request ollama.ChatRequest
 	client := &http.Client{
@@ -69,6 +71,7 @@ func TestPlannerGeneratesPlanFromModelJSON(t *testing.T) {
 	}
 }
 
+// TestPlannerParsesFencedJSON 验证 planner 能解析被 markdown 代码块包裹的 JSON。
 func TestPlannerParsesFencedJSON(t *testing.T) {
 	got, err := ParsePlan("```json\n{\"goal\":\"g\",\"steps\":[{\"task\":\"t\"}]}\n```")
 	if err != nil {

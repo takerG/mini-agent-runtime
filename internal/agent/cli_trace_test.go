@@ -11,6 +11,7 @@ import (
 	tracing "mini-agent-runtime/internal/trace"
 )
 
+// TestRunChatLoopWithTraceLogsAgentToolFlow 验证 trace hooks 能记录普通 agent 工具调用流程。
 func TestRunChatLoopWithTraceLogsAgentToolFlow(t *testing.T) {
 	var requests []ollama.ChatRequest
 	client := &http.Client{
@@ -101,6 +102,7 @@ func TestRunChatLoopWithTraceLogsAgentToolFlow(t *testing.T) {
 	}
 }
 
+// TestRunChatLoopWithTraceLogsPlannerExecutorFlow 验证 trace hooks 能记录 planner/executor 流程。
 func TestRunChatLoopWithTraceLogsPlannerExecutorFlow(t *testing.T) {
 	var requests []ollama.ChatRequest
 	client := &http.Client{
@@ -171,6 +173,7 @@ func TestRunChatLoopWithTraceLogsPlannerExecutorFlow(t *testing.T) {
 	}
 }
 
+// traceNamesContain 判断 trace 名称列表中是否包含目标事件名。
 func traceNamesContain(names []tracing.TraceEventName, want tracing.TraceEventName) bool {
 	for _, name := range names {
 		if name == want {
@@ -180,6 +183,7 @@ func traceNamesContain(names []tracing.TraceEventName, want tracing.TraceEventNa
 	return false
 }
 
+// firstTraceData 返回指定 trace 事件名对应的第一份结构化数据。
 func firstTraceData[T any](events []tracing.TraceEvent, name tracing.TraceEventName) (T, bool) {
 	var zero T
 	for _, event := range events {
@@ -199,6 +203,7 @@ type recordingTraceSink struct {
 	events []tracing.TraceEvent
 }
 
+// Emit 把 trace 事件追加到测试 sink 中，便于断言事件顺序和内容。
 func (s *recordingTraceSink) Emit(event tracing.TraceEvent) {
 	s.events = append(s.events, event)
 }

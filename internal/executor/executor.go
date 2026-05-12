@@ -35,6 +35,7 @@ type Executor struct {
 	showProcess bool
 }
 
+// NewExecutor 创建执行器，并补齐输出、trace 和 reporter 的默认依赖。
 func NewExecutor(options Options) *Executor {
 	stdout := options.Stdout
 	if stdout == nil {
@@ -59,6 +60,7 @@ func NewExecutor(options Options) *Executor {
 	}
 }
 
+// Execute 根据 planner 生成的计划驱动模型和工具调用，并返回最终面向用户的回答。
 func (e *Executor) Execute(ctx context.Context, userMessage string, plan planner.Plan) (string, error) {
 	if e.registry == nil {
 		e.registry = tools.NewDefaultToolRegistry(nil)
@@ -143,30 +145,34 @@ type toolObservation struct {
 	Result string
 }
 
+// printPlan 将 executor 实际发起的工具调用按 plan 区块输出到 CLI。
 func (e *Executor) printPlan(toolCalls []ollama.ToolCall) {
-	fmt.Fprintln(e.stdout, "[plan]")
+	_, _ = fmt.Fprintln(e.stdout, "[plan]")
 	for i, call := range toolCalls {
 		fmt.Fprintf(e.stdout, "%d. tool_call %s %s\n", i+1, call.Function.Name, formatToolArguments(call.Function.Arguments))
 	}
-	fmt.Fprintln(e.stdout)
+	_, _ = fmt.Fprintln(e.stdout)
 }
 
+// printObservations 将工具执行结果按 observation 区块输出到 CLI。
 func (e *Executor) printObservations(observations []toolObservation) {
-	fmt.Fprintln(e.stdout, "[observation]")
+	_, _ = fmt.Fprintln(e.stdout, "[observation]")
 	for i, observation := range observations {
 		fmt.Fprintf(e.stdout, "%d. %s -> %s\n", i+1, observation.Name, observation.Result)
 	}
-	fmt.Fprintln(e.stdout)
+	_, _ = fmt.Fprintln(e.stdout)
 }
 
+// printProcessAndFinalHeader 输出 plan/observation 过程信息，并打印最终回答标题。
 func (e *Executor) printProcessAndFinalHeader(toolCalls []ollama.ToolCall, observations []toolObservation) {
 	if len(toolCalls) > 0 {
 		e.printPlan(toolCalls)
 		e.printObservations(observations)
 	}
-	fmt.Fprintln(e.stdout, "Agent:")
+	_, _ = fmt.Fprintln(e.stdout, "Agent:")
 }
 
+// formatToolArguments 将工具调用参数格式化成紧凑 JSON，便于展示执行过程。
 func formatToolArguments(args map[string]any) string {
 	if args == nil {
 		return "{}"
@@ -178,6 +184,7 @@ func formatToolArguments(args map[string]any) string {
 	return string(data)
 }
 
+// executeToolCall 执行单次工具调用，并把失败结果转换成模型可继续处理的文本。
 func (e *Executor) executeToolCall(ctx context.Context, call ollama.ToolCall) string {
 	result, err := e.registry.Execute(ctx, call)
 	if err != nil {
@@ -189,6 +196,7 @@ func (e *Executor) executeToolCall(ctx context.Context, call ollama.ToolCall) st
 	return result
 }
 
+// executorSystemPrompt 根据 planner 输出构造 executor 阶段的系统提示词。
 func executorSystemPrompt(plan planner.Plan) string {
 	planJSON, err := json.MarshalIndent(plan, "", "  ")
 	if err != nil {

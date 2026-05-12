@@ -11,18 +11,22 @@ import (
 
 type CalculatorAgentTool struct{}
 
+// NewCalculatorTool 创建 calculator 工具实例。
 func NewCalculatorTool() Tool {
 	return CalculatorAgentTool{}
 }
 
+// Name 返回 calculator 工具注册到模型和运行时中的名称。
 func (CalculatorAgentTool) Name() string {
 	return "calculator"
 }
 
+// Description 返回 calculator 工具给模型理解用途的说明。
 func (CalculatorAgentTool) Description() string {
 	return "执行两个数字之间的四则运算。当用户需要精确计算加减乘除时使用。"
 }
 
+// Definition 返回 calculator 工具的 Ollama function calling 定义。
 func (t CalculatorAgentTool) Definition() ollama.ToolDefinition {
 	return ollama.ToolDefinition{
 		Type: "function",
@@ -52,6 +56,7 @@ func (t CalculatorAgentTool) Definition() ollama.ToolDefinition {
 	}
 }
 
+// Execute 校验 calculator 参数并执行四则运算。
 func (CalculatorAgentTool) Execute(_ context.Context, args map[string]any) (string, error) {
 	op, err := stringArgument("calculator", args, "op")
 	if err != nil {
@@ -91,6 +96,7 @@ func CalculatorTool(op string, a float64, b float64) (float64, error) {
 	}
 }
 
+// stringArgument 从工具参数中读取必填字符串参数。
 func stringArgument(toolName string, args map[string]any, name string) (string, error) {
 	value, ok := args[name]
 	if !ok {
@@ -103,6 +109,7 @@ func stringArgument(toolName string, args map[string]any, name string) (string, 
 	return text, nil
 }
 
+// floatArgument 从工具参数中读取必填数字参数。
 func floatArgument(toolName string, args map[string]any, name string) (float64, error) {
 	value, ok := args[name]
 	if !ok {

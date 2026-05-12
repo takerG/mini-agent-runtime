@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestAppErrorKeepsCodeMessageAndNodeChain 验证 AppError 会保留错误码、消息和节点链路。
 func TestAppErrorKeepsCodeMessageAndNodeChain(t *testing.T) {
 	root := New(NodeToolRegistry, CodeToolNotFound, "unknown tool: missing_tool")
 	wrapped := Wrap(NodeAgentToolCall, CodeToolExecutionFailed, root, "tool call failed")
@@ -28,6 +29,7 @@ func TestAppErrorKeepsCodeMessageAndNodeChain(t *testing.T) {
 	}
 }
 
+// TestFormatForModelUsesStableToolErrorShape 验证交给模型的错误文本保持稳定结构。
 func TestFormatForModelUsesStableToolErrorShape(t *testing.T) {
 	err := Wrap(
 		NodeAgentToolCall,
@@ -51,6 +53,7 @@ func TestFormatForModelUsesStableToolErrorShape(t *testing.T) {
 	}
 }
 
+// TestReporterPrintsDebugOnlyWhenEnabled 验证 reporter 只在 debug 开启时输出调试信息。
 func TestReporterPrintsDebugOnlyWhenEnabled(t *testing.T) {
 	err := Wrap(
 		NodeAgentLoop,
@@ -82,6 +85,7 @@ func TestReporterPrintsDebugOnlyWhenEnabled(t *testing.T) {
 	}
 }
 
+// TestReporterLogAlwaysIncludesOriginAndNodeChain 验证普通错误日志始终包含发生节点和调用链。
 func TestReporterLogAlwaysIncludesOriginAndNodeChain(t *testing.T) {
 	err := Wrap(
 		NodeServerProxy,

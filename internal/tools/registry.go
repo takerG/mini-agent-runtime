@@ -32,16 +32,19 @@ type ToolRegistry struct {
 	tools map[string]Tool
 }
 
+// NewToolRegistry 创建空工具注册表，调用方可以按需注册 Tool 实现。
 func NewToolRegistry() *ToolRegistry {
 	return &ToolRegistry{
 		tools: make(map[string]Tool),
 	}
 }
 
+// Register 将工具实现注册到工具表中，同名工具会被后注册的实现覆盖。
 func (r *ToolRegistry) Register(tool Tool) {
 	r.tools[tool.Name()] = tool
 }
 
+// Definitions 返回所有已注册工具的模型可见定义。
 func (r *ToolRegistry) Definitions() []ollama.ToolDefinition {
 	definitions := make([]ollama.ToolDefinition, 0, len(r.tools))
 	for _, tool := range r.tools {
@@ -50,6 +53,7 @@ func (r *ToolRegistry) Definitions() []ollama.ToolDefinition {
 	return definitions
 }
 
+// Execute 根据模型工具调用名称查找工具并执行。
 func (r *ToolRegistry) Execute(ctx context.Context, call ollama.ToolCall) (string, error) {
 	tool, ok := r.tools[call.Function.Name]
 	if !ok {
@@ -58,6 +62,7 @@ func (r *ToolRegistry) Execute(ctx context.Context, call ollama.ToolCall) (strin
 	return tool.Execute(ctx, call.Function.Arguments)
 }
 
+// NewDefaultToolRegistry 注册当前版本内置的默认工具集合。
 func NewDefaultToolRegistry(now func() time.Time) *ToolRegistry {
 	registry := NewToolRegistry()
 	registry.Register(NewCurrentTimeTool(now))

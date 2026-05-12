@@ -13,10 +13,12 @@ import (
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
+// RoundTrip 让测试可以用函数模拟 http.RoundTripper。
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
 
+// TestClientChatStreamsResponseAndEmitsFullTrace 验证模型客户端会流式输出并记录完整 trace。
 func TestClientChatStreamsResponseAndEmitsFullTrace(t *testing.T) {
 	var requestBody ollama.ChatRequest
 	httpClient := &http.Client{
@@ -98,6 +100,7 @@ func TestClientChatStreamsResponseAndEmitsFullTrace(t *testing.T) {
 	}
 }
 
+// traceData 从测试事件列表中读取指定类型的 trace 数据。
 func traceData[T any](t *testing.T, events []tracing.TraceEvent, name tracing.TraceEventName) T {
 	t.Helper()
 	var zero T
@@ -119,6 +122,7 @@ type recordingTraceSink struct {
 	events []tracing.TraceEvent
 }
 
+// Emit 把 trace 事件追加到测试 sink 中，便于后续断言。
 func (s *recordingTraceSink) Emit(event tracing.TraceEvent) {
 	s.events = append(s.events, event)
 }

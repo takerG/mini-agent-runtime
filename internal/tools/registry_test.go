@@ -13,14 +13,17 @@ type echoTool struct {
 	seenContext context.Context
 }
 
+// Name 返回测试 echo 工具的注册名称。
 func (t *echoTool) Name() string {
 	return "echo"
 }
 
+// Description 返回测试 echo 工具的说明文本。
 func (t *echoTool) Description() string {
 	return "return the provided text"
 }
 
+// Definition 返回测试 echo 工具的模型可见定义。
 func (t *echoTool) Definition() ollama.ToolDefinition {
 	return ollama.ToolDefinition{
 		Type: "function",
@@ -32,11 +35,13 @@ func (t *echoTool) Definition() ollama.ToolDefinition {
 	}
 }
 
+// Execute 返回测试 echo 工具参数中的 text 字段。
 func (t *echoTool) Execute(ctx context.Context, args map[string]any) (string, error) {
 	t.seenContext = ctx
 	return "echo:" + args["text"].(string), nil
 }
 
+// TestToolRegistryRegistersToolImplementations 验证注册表能注册、暴露并执行工具实现。
 func TestToolRegistryRegistersToolImplementations(t *testing.T) {
 	registry := NewToolRegistry()
 	tool := &echoTool{}
@@ -70,6 +75,7 @@ func TestToolRegistryRegistersToolImplementations(t *testing.T) {
 	}
 }
 
+// TestToolRegistryReturnsErrorForUnknownTool 验证未知工具调用会返回稳定错误。
 func TestToolRegistryReturnsErrorForUnknownTool(t *testing.T) {
 	registry := NewToolRegistry()
 	_, err := registry.Execute(context.Background(), ollama.ToolCall{
@@ -83,6 +89,7 @@ func TestToolRegistryReturnsErrorForUnknownTool(t *testing.T) {
 	}
 }
 
+// TestNewDefaultToolRegistryIncludesBuiltInTools 验证默认注册表包含内置工具集合。
 func TestNewDefaultToolRegistryIncludesBuiltInTools(t *testing.T) {
 	registry := NewDefaultToolRegistry(func() time.Time {
 		return time.Date(2026, 5, 2, 18, 30, 0, 0, time.FixedZone("CST", 8*60*60))

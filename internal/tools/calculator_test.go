@@ -10,6 +10,7 @@ import (
 	"mini-agent-runtime/internal/ollama"
 )
 
+// TestCalculatorToolImplementsToolInterface 验证 calculator 工具实现了 Tool 接口契约。
 func TestCalculatorToolImplementsToolInterface(t *testing.T) {
 	var tool Tool = NewCalculatorTool()
 
@@ -24,6 +25,7 @@ func TestCalculatorToolImplementsToolInterface(t *testing.T) {
 	}
 }
 
+// TestCalculatorToolSupportsFourBasicOperations 验证 calculator 支持四则运算。
 func TestCalculatorToolSupportsFourBasicOperations(t *testing.T) {
 	tests := []struct {
 		name string
@@ -51,18 +53,21 @@ func TestCalculatorToolSupportsFourBasicOperations(t *testing.T) {
 	}
 }
 
+// TestCalculatorToolRejectsDivisionByZero 验证 calculator 会拒绝除零。
 func TestCalculatorToolRejectsDivisionByZero(t *testing.T) {
 	if _, err := CalculatorTool("/", 1, 0); err == nil {
 		t.Fatal("CalculatorTool returned nil error, want division by zero error")
 	}
 }
 
+// TestCalculatorToolRejectsUnknownOperation 验证 calculator 会拒绝未知运算符。
 func TestCalculatorToolRejectsUnknownOperation(t *testing.T) {
 	if _, err := CalculatorTool("%", 1, 2); err == nil {
 		t.Fatal("CalculatorTool returned nil error, want unknown operation error")
 	}
 }
 
+// TestDefaultToolRegistryRunsCalculatorTool 验证默认注册表能执行 calculator 工具。
 func TestDefaultToolRegistryRunsCalculatorTool(t *testing.T) {
 	registry := NewDefaultToolRegistry(time.Now)
 
@@ -84,6 +89,7 @@ func TestDefaultToolRegistryRunsCalculatorTool(t *testing.T) {
 	}
 }
 
+// TestDefaultToolRegistryReturnsCalculatorErrors 验证默认注册表会透传 calculator 错误。
 func TestDefaultToolRegistryReturnsCalculatorErrors(t *testing.T) {
 	registry := NewDefaultToolRegistry(time.Now)
 

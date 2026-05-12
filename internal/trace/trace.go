@@ -40,10 +40,12 @@ type TraceHooks struct {
 	sink TraceSink
 }
 
+// NewTraceHooks 创建 trace hook 集合，用于把关键运行节点事件统一发送到 sink。
 func NewTraceHooks(sink TraceSink) *TraceHooks {
 	return &TraceHooks{sink: sink}
 }
 
+// emit 在 hook 可用时发送 trace 事件，空 hook 会被安全忽略。
 func (h *TraceHooks) emit(name TraceEventName, data any) {
 	if h == nil || h.sink == nil {
 		return
@@ -124,58 +126,72 @@ type FinalAnswerTrace struct {
 	HistoryMessages int
 }
 
+// ChatLoopStart 记录 CLI 对话循环启动事件。
 func (h *TraceHooks) ChatLoopStart(data ChatLoopStartTrace) {
 	h.emit(TraceChatLoopStart, data)
 }
 
+// ChatLoopExit 记录 CLI 对话循环退出事件。
 func (h *TraceHooks) ChatLoopExit(data ChatLoopExitTrace) {
 	h.emit(TraceChatLoopExit, data)
 }
 
+// TurnInput 记录单轮用户输入事件。
 func (h *TraceHooks) TurnInput(data TurnInputTrace) {
 	h.emit(TraceTurnInput, data)
 }
 
+// ModelRequest 记录发送给模型的完整请求事件。
 func (h *TraceHooks) ModelRequest(data ModelRequestTrace) {
 	h.emit(TraceModelRequest, data)
 }
 
+// ModelResponse 记录模型返回的文本和工具调用事件。
 func (h *TraceHooks) ModelResponse(data ModelResponseTrace) {
 	h.emit(TraceModelResponse, data)
 }
 
+// ToolCall 记录即将执行的工具调用事件。
 func (h *TraceHooks) ToolCall(data ToolCallTrace) {
 	h.emit(TraceToolCall, data)
 }
 
+// ToolResult 记录工具调用成功后的返回结果事件。
 func (h *TraceHooks) ToolResult(data ToolResultTrace) {
 	h.emit(TraceToolResult, data)
 }
 
+// ToolError 记录工具调用失败事件。
 func (h *TraceHooks) ToolError(data ToolErrorTrace) {
 	h.emit(TraceToolError, data)
 }
 
+// PlannerRequest 记录 planner 阶段收到的用户目标事件。
 func (h *TraceHooks) PlannerRequest(data PlannerRequestTrace) {
 	h.emit(TracePlannerRequest, data)
 }
 
+// PlannerResponse 记录 planner 阶段生成计划后的摘要事件。
 func (h *TraceHooks) PlannerResponse(data PlannerResponseTrace) {
 	h.emit(TracePlannerResponse, data)
 }
 
+// ExecutorStart 记录 executor 阶段启动事件。
 func (h *TraceHooks) ExecutorStart(data ExecutorStartTrace) {
 	h.emit(TraceExecutorStart, data)
 }
 
+// ExecutorStep 记录 executor 将要处理的计划步骤事件。
 func (h *TraceHooks) ExecutorStep(data ExecutorStepTrace) {
 	h.emit(TraceExecutorStep, data)
 }
 
+// ExecutorFinish 记录 executor 阶段完成事件。
 func (h *TraceHooks) ExecutorFinish(data ExecutorFinishTrace) {
 	h.emit(TraceExecutorFinish, data)
 }
 
+// FinalAnswer 记录一轮对话最终回答进入历史后的事件。
 func (h *TraceHooks) FinalAnswer(data FinalAnswerTrace) {
 	h.emit(TraceFinalAnswer, data)
 }
@@ -185,6 +201,7 @@ type TraceLogger struct {
 	writer  io.Writer
 }
 
+// NewTraceLogger 创建把 trace 事件写入文本流的 logger。
 func NewTraceLogger(enabled bool, writer io.Writer) *TraceLogger {
 	return &TraceLogger{
 		enabled: enabled,
@@ -192,6 +209,7 @@ func NewTraceLogger(enabled bool, writer io.Writer) *TraceLogger {
 	}
 }
 
+// Emit 按统一格式输出单个 trace 事件。
 func (t *TraceLogger) Emit(event TraceEvent) {
 	if t == nil || !t.enabled || t.writer == nil {
 		return
@@ -199,6 +217,7 @@ func (t *TraceLogger) Emit(event TraceEvent) {
 	fmt.Fprintf(t.writer, "[trace] %s: %s\n", event.Name, formatTraceData(event.Data))
 }
 
+// Log 保留兼容旧调用的格式化 trace 日志输出能力。
 func (t *TraceLogger) Log(step string, format string, args ...any) {
 	if t == nil || !t.enabled || t.writer == nil {
 		return
@@ -207,6 +226,7 @@ func (t *TraceLogger) Log(step string, format string, args ...any) {
 	fmt.Fprintf(t.writer, "[trace] %s: %s\n", step, message)
 }
 
+// formatTraceData 根据 trace payload 类型生成可读的一行日志内容。
 func formatTraceData(data any) string {
 	switch value := data.(type) {
 	case ChatLoopStartTrace:
@@ -249,6 +269,7 @@ func formatTraceData(data any) string {
 	}
 }
 
+// formatTraceJSON 将复杂 trace payload 格式化成缩进 JSON。
 func formatTraceJSON(value any) string {
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {

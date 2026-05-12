@@ -53,6 +53,7 @@ type AppError struct {
 	Cause   error
 }
 
+// New 创建不包含底层 cause 的应用错误。
 func New(node Node, code Code, message string) *AppError {
 	return &AppError{
 		Code:    code,
@@ -61,6 +62,7 @@ func New(node Node, code Code, message string) *AppError {
 	}
 }
 
+// Wrap 用统一错误码和运行节点包装底层错误，保留调用链上下文。
 func Wrap(node Node, code Code, cause error, message string) *AppError {
 	if cause == nil {
 		return New(node, code, message)
@@ -73,6 +75,7 @@ func Wrap(node Node, code Code, cause error, message string) *AppError {
 	}
 }
 
+// Error 返回面向日志和调试的错误文本。
 func (e *AppError) Error() string {
 	if e == nil {
 		return ""
@@ -83,6 +86,7 @@ func (e *AppError) Error() string {
 	return fmt.Sprintf("%s: %v", e.Message, e.Cause)
 }
 
+// Unwrap 返回底层 cause，使 errors.Is 和 errors.As 能继续沿错误链工作。
 func (e *AppError) Unwrap() error {
 	if e == nil {
 		return nil
@@ -90,6 +94,7 @@ func (e *AppError) Unwrap() error {
 	return e.Cause
 }
 
+// AsAppError 尝试从任意 error 中提取 AppError。
 func AsAppError(err error) *AppError {
 	var appErr *AppError
 	if stderrors.As(err, &appErr) {
@@ -98,6 +103,7 @@ func AsAppError(err error) *AppError {
 	return nil
 }
 
+// NodeChain 按从外到内的顺序提取错误经过的运行节点链路。
 func NodeChain(err error) []string {
 	var chain []string
 	for err != nil {
@@ -111,6 +117,7 @@ func NodeChain(err error) []string {
 	return chain
 }
 
+// OriginNode 返回错误链最内层的运行节点，也就是最接近真实发生位置的节点。
 func OriginNode(err error) Node {
 	var origin Node
 	for err != nil {
@@ -124,6 +131,7 @@ func OriginNode(err error) Node {
 	return origin
 }
 
+// FormatForModel 将错误整理成模型容易理解的工具 observation 文本。
 func FormatForModel(err error) string {
 	info := collectInfo(err)
 	return fmt.Sprintf(
@@ -141,6 +149,7 @@ type Reporter struct {
 	writer io.Writer
 }
 
+// NewReporter 创建统一错误 reporter，用于普通日志和 debug 明细输出。
 func NewReporter(debug bool, writer io.Writer) *Reporter {
 	return &Reporter{
 		debug:  debug,
@@ -148,6 +157,7 @@ func NewReporter(debug bool, writer io.Writer) *Reporter {
 	}
 }
 
+// Log 将错误按面向操作者的格式写入 reporter 输出流。
 func (r *Reporter) Log(err error) {
 	if r == nil || r.writer == nil || err == nil {
 		return
@@ -155,6 +165,7 @@ func (r *Reporter) Log(err error) {
 	fmt.Fprintf(r.writer, "[error] %s\n", formatForOperator(err))
 }
 
+// Debug 在 debug 模式开启时打印更适合排障的错误明细。
 func (r *Reporter) Debug(err error) {
 	if r == nil || !r.debug || r.writer == nil || err == nil {
 		return
@@ -162,6 +173,7 @@ func (r *Reporter) Debug(err error) {
 	fmt.Fprintf(r.writer, "[debug] error: %s\n", formatForOperator(err))
 }
 
+// formatForOperator 将错误格式化成人类排障时更容易扫描的一行文本。
 func formatForOperator(err error) string {
 	info := collectInfo(err)
 	return fmt.Sprintf(
@@ -182,6 +194,7 @@ type errorInfo struct {
 	Detail    string
 }
 
+// collectInfo 从错误链中提取统一错误码、发生节点、节点链路和细节信息。
 func collectInfo(err error) errorInfo {
 	info := errorInfo{
 		Code:      CodeUnknown,
@@ -210,6 +223,7 @@ func collectInfo(err error) errorInfo {
 	return info
 }
 
+// deepestMessage 返回错误链最内层的消息，帮助定位真正失败原因。
 func deepestMessage(err error) string {
 	detail := fmt.Sprint(err)
 	for err != nil {

@@ -15,16 +15,19 @@ type flusher interface {
 	Flush()
 }
 
+// StreamChatContent 从 Ollama 流式响应中解析 message.content，并立即写入目标 writer。
 func StreamChatContent(r io.Reader, w io.Writer) error {
 	_, err := StreamChatContentAndCapture(r, w)
 	return err
 }
 
+// StreamChatContentAndCapture 流式转发内容的同时返回完整捕获文本。
 func StreamChatContentAndCapture(r io.Reader, w io.Writer) (string, error) {
 	content, _, err := StreamChatMessageAndCapture(r, w)
 	return content, err
 }
 
+// StreamChatMessageAndCapture 流式转发内容，并捕获完整文本和模型返回的工具调用。
 func StreamChatMessageAndCapture(r io.Reader, w io.Writer) (string, []ToolCall, error) {
 	return StreamChatMessageAndCaptureWithOptions(r, StreamOptions{Writer: w})
 }
@@ -34,6 +37,7 @@ type StreamOptions struct {
 	BeforeContent func() error
 }
 
+// StreamChatMessageAndCaptureWithOptions 使用扩展选项解析 Ollama 流式响应。
 func StreamChatMessageAndCaptureWithOptions(r io.Reader, options StreamOptions) (string, []ToolCall, error) {
 	var captured strings.Builder
 	var toolCalls []ToolCall

@@ -8,6 +8,7 @@ import (
 	"mini-agent-runtime/internal/agent"
 )
 
+// TestParseCLIOptionsAcceptsDoubleDashFlags 验证 CLI 能解析常见的双横线参数形式。
 func TestParseCLIOptionsAcceptsDoubleDashFlags(t *testing.T) {
 	var output strings.Builder
 
@@ -35,6 +36,7 @@ func TestParseCLIOptionsAcceptsDoubleDashFlags(t *testing.T) {
 	}
 }
 
+// TestCLIUsageShowsDoubleDashFlags 验证帮助信息使用双横线展示参数名称。
 func TestCLIUsageShowsDoubleDashFlags(t *testing.T) {
 	var output strings.Builder
 

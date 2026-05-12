@@ -8,6 +8,7 @@ import (
 	"mini-agent-runtime/internal/ollama"
 )
 
+// TestCurrentTimeToolImplementsToolInterface 验证 current_time 工具实现了 Tool 接口契约。
 func TestCurrentTimeToolImplementsToolInterface(t *testing.T) {
 	var tool Tool = NewCurrentTimeTool(func() time.Time {
 		return time.Date(2026, 5, 2, 18, 30, 0, 0, time.FixedZone("CST", 8*60*60))
@@ -24,6 +25,7 @@ func TestCurrentTimeToolImplementsToolInterface(t *testing.T) {
 	}
 }
 
+// TestCurrentTimeToolFormatsInjectedTime 验证 current_time 会格式化注入的固定时间。
 func TestCurrentTimeToolFormatsInjectedTime(t *testing.T) {
 	now := func() time.Time {
 		return time.Date(2026, 4, 30, 17, 58, 9, 0, time.FixedZone("CST", 8*60*60))
@@ -36,6 +38,7 @@ func TestCurrentTimeToolFormatsInjectedTime(t *testing.T) {
 	}
 }
 
+// TestDefaultToolRegistryRunsCurrentTimeTool 验证默认注册表能执行 current_time 工具。
 func TestDefaultToolRegistryRunsCurrentTimeTool(t *testing.T) {
 	registry := NewDefaultToolRegistry(func() time.Time {
 		return time.Date(2026, 4, 30, 18, 30, 0, 0, time.FixedZone("CST", 8*60*60))

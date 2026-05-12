@@ -30,6 +30,7 @@ const (
 	defaultModel    = "qwen3:4b"
 )
 
+// main 是程序入口，负责解析 CLI 参数，并根据启动模式进入 HTTP 代理或命令行对话流程。
 func main() {
 	options, err := parseCLIOptions(os.Args[1:], os.Stderr)
 	if err != nil {
@@ -65,6 +66,7 @@ func main() {
 	}
 }
 
+// parseCLIOptions 解析命令行参数，并把 flag 与环境变量合并成运行时需要的配置。
 func parseCLIOptions(args []string, output io.Writer) (cliOptions, error) {
 	flags := newCLIFlagSet(output)
 	endpoint := flags.String("url", getenvDefault("LOCAL_MODEL_CHAT_URL", defaultEndpoint), "chat API URL")
@@ -72,7 +74,7 @@ func parseCLIOptions(args []string, output io.Writer) (cliOptions, error) {
 	think := flags.Bool("think", true, "hide model thinking output when true; show it when false")
 	trace := flags.Bool("trace", false, "write full agent trace logs to stderr")
 	debug := flags.Bool("debug", false, "write structured debug error details to stderr")
-	mode := flags.String("mode", string(agent.ModeChat), "agent mode: chat or plan")
+	mode := flags.String("mode", string(agent.ModeChat), "agent mode: chat, plan, or strict-plan")
 	serveAddr := flags.String("serve", "", "serve a streaming HTTP proxy on this address, for example 127.0.0.1:8080")
 	if err := flags.Parse(args); err != nil {
 		return cliOptions{}, err
@@ -89,6 +91,7 @@ func parseCLIOptions(args []string, output io.Writer) (cliOptions, error) {
 	}, nil
 }
 
+// newCLIFlagSet 创建 CLI 参数解析器，并统一定制帮助信息的输出格式。
 func newCLIFlagSet(output io.Writer) *flag.FlagSet {
 	flags := flag.NewFlagSet("mini-agent-runtime", flag.ContinueOnError)
 	if output == nil {
@@ -102,12 +105,13 @@ func newCLIFlagSet(output io.Writer) *flag.FlagSet {
 			if flagValue.DefValue != "" {
 				fmt.Fprintf(output, " (default %s)", flagValue.DefValue)
 			}
-			fmt.Fprintln(output)
+			_, _ = fmt.Fprintln(output)
 		})
 	}
 	return flags
 }
 
+// getenvDefault 读取环境变量，当环境变量为空时返回传入的默认值。
 func getenvDefault(name string, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(name))
 	if value == "" {
@@ -116,6 +120,7 @@ func getenvDefault(name string, fallback string) string {
 	return value
 }
 
+// exitWithError 统一处理入口层致命错误的日志输出和进程退出。
 func exitWithError(err error, debug bool) {
 	// main 是程序最外层，只负责把致命错误交给统一 reporter。
 	// 真正的发生节点应该由内部包 Wrap 标注；main 这里只代表错误传播到了入口。

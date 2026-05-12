@@ -21,14 +21,17 @@ const maxToolRounds = 4
 type Mode string
 
 const (
-	ModeChat Mode = "chat"
-	ModePlan Mode = "plan"
+	ModeChat       Mode = "chat"
+	ModePlan       Mode = "plan"
+	ModeStrictPlan Mode = "strict-plan"
 )
 
+// RunChatLoop 使用默认 trace 配置启动命令行多轮对话流程。
 func RunChatLoop(endpoint string, model string, think bool, client *http.Client, initialArgs []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	return RunChatLoopWithTrace(endpoint, model, think, client, initialArgs, stdin, stdout, stderr, tracing.NewTraceHooks(tracing.NewTraceLogger(false, stderr)))
 }
 
+// RunChatLoopWithTrace 使用外部传入的 trace hooks 启动命令行多轮对话流程。
 func RunChatLoopWithTrace(endpoint string, model string, think bool, client *http.Client, initialArgs []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, traceHooks *tracing.TraceHooks) error {
 	return RunChatLoopWithOptions(ChatLoopOptions{
 		Endpoint:    endpoint,
@@ -57,6 +60,7 @@ type ChatLoopOptions struct {
 	Mode        Mode
 }
 
+// RunChatLoopWithOptions 根据完整配置启动 CLI，对用户输入、模型流式响应和工具调用进行编排。
 func RunChatLoopWithOptions(options ChatLoopOptions) error {
 	endpoint := options.Endpoint
 	model := options.Model
@@ -137,13 +141,20 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 		messages = append(messages, ollama.Message{Role: "user", Content: pending})
 		traceHooks.TurnInput(tracing.TurnInputTrace{Message: pending, HistoryMessages: len(messages)})
 
+		var assistantMessage string
+		var err error
 		// Planner / Executor 模式
-		if mode == ModePlan {
-			assistantMessage, err := runtime.RunPlannerExecutorTurn(context.Background(), pending)
+		if isPlannerMode(mode) {
+			if mode == ModePlan {
+				assistantMessage, err = runtime.RunPlannerExecutorTurn(context.Background(), pending)
+			}
+			if mode == ModeStrictPlan {
+				assistantMessage, err = runtime.RunStrictPlannerExecutorTurn(context.Background(), pending)
+			}
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(stdout)
+			_, _ = fmt.Fprintln(stdout)
 			if assistantMessage != "" {
 				messages = append(messages, ollama.Message{Role: "assistant", Content: assistantMessage})
 			}
@@ -177,7 +188,7 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 			toolCalls := result.ToolCalls
 
 			if len(toolCalls) == 0 {
-				fmt.Fprintln(stdout)
+				_, _ = fmt.Fprintln(stdout)
 				if assistantMessage != "" {
 					messages = append(messages, ollama.Message{Role: "assistant", Content: assistantMessage})
 				}
@@ -206,6 +217,7 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 	}
 }
 
+// executeToolCallForModel 执行模型请求的工具调用，并把工具错误格式化成模型可理解的 observation。
 func executeToolCallForModel(ctx context.Context, toolRegistry *tools.ToolRegistry, call ollama.ToolCall, traceHooks *tracing.TraceHooks, reporter *apperrors.Reporter) string {
 	result, err := toolRegistry.Execute(ctx, call)
 	if err != nil {
@@ -217,6 +229,7 @@ func executeToolCallForModel(ctx context.Context, toolRegistry *tools.ToolRegist
 	return result
 }
 
+// isExitCommand 判断用户输入是否是退出 CLI 对话的命令。
 func isExitCommand(message string) bool {
 	switch strings.ToLower(strings.TrimSpace(message)) {
 	case "/exit", "exit", "/quit", "quit":
@@ -224,4 +237,9 @@ func isExitCommand(message string) bool {
 	default:
 		return false
 	}
+}
+
+// isPlannerMode 判断是否是 Planner / Strict Planner 模式，这两种模式的交互流程和普通 Chat 模式不同。
+func isPlannerMode(mode Mode) bool {
+	return mode == ModePlan || mode == ModeStrictPlan
 }

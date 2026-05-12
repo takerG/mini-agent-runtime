@@ -10,10 +10,12 @@ import (
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
+// RoundTrip 让测试可以用函数模拟 http.RoundTripper。
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
 
+// TestChatProxyHandlerStreamsModelContentToClient 验证 HTTP 代理会把模型流式内容转发给客户端。
 func TestChatProxyHandlerStreamsModelContentToClient(t *testing.T) {
 	var upstreamBody string
 	client := &http.Client{

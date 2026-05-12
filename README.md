@@ -56,13 +56,13 @@ go run . --model qwen3:4b --debug "23 / 0 等于多少？"
 
 Debug output is controlled by `--debug`. It includes stable error codes, the origin node where the error happened, and the node chain that shows how the error traveled through the runtime.
 
-Enable planner/executor mode when you want the runtime to plan first, then execute the plan with native tool calls:
+Enable hybrid planner/executor mode when you want the runtime to plan first, then let the executor model continue native tool calling:
 
 ```powershell
 go run . --mode plan "现在几点？顺便算一下 23 * 19"
 ```
 
-In `plan` mode the CLI prints the full process:
+In `plan` mode, the planner creates a task plan, then the executor model decides native `tool_calls`. The CLI prints the full process:
 
 ```text
 [plan]
@@ -76,6 +76,20 @@ In `plan` mode the CLI prints the full process:
 Agent:
 计算结果是 437，当前时间是 2026-05-08 20:51:42 CST。
 ```
+
+Enable strict planner/executor mode when you want the planner to output executable JSON and Go to execute each tool call directly:
+
+```powershell
+go run . --mode strict-plan "请先计算 23 * 19，再获取当前时间，最后生成一个简短记录。"
+```
+
+In `strict-plan` mode, the model only chooses the executable plan and writes the final summary. Go parses `tool_name` and `arguments`, executes tools through `ToolRegistry`, collects observations, and sends those observations to the model without exposing tools on the summary request.
+
+Mode comparison:
+
+- `chat`: the model directly uses native tool calling during the conversation.
+- `plan`: hybrid planner/executor; planner writes a plan, executor model still decides native tool calls.
+- `strict-plan`: strict planner/executor; planner writes executable JSON, Go executes tools, model only summarizes observations.
 
 The default mode is `chat`, which preserves the original direct native tool-calling behavior.
 

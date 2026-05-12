@@ -7,6 +7,7 @@ import (
 	"mini-agent-runtime/internal/ollama"
 )
 
+// TestTraceLoggerWritesOnlyWhenEnabled 验证 trace logger 只在启用时写日志。
 func TestTraceLoggerWritesOnlyWhenEnabled(t *testing.T) {
 	var enabled strings.Builder
 	trace := NewTraceLogger(true, &enabled)
@@ -23,6 +24,7 @@ func TestTraceLoggerWritesOnlyWhenEnabled(t *testing.T) {
 	}
 }
 
+// TestTraceHooksEmitStructuredEventsToSink 验证 trace hooks 会把结构化事件发送给 sink。
 func TestTraceHooksEmitStructuredEventsToSink(t *testing.T) {
 	sink := &recordingTraceSink{}
 	hooks := NewTraceHooks(sink)
@@ -49,6 +51,7 @@ func TestTraceHooksEmitStructuredEventsToSink(t *testing.T) {
 	}
 }
 
+// TestTraceLoggerIncludesFullModelRequestAndResponse 验证 trace 日志包含完整模型请求和响应。
 func TestTraceLoggerIncludesFullModelRequestAndResponse(t *testing.T) {
 	var output strings.Builder
 	logger := NewTraceLogger(true, &output)
@@ -108,6 +111,7 @@ type recordingTraceSink struct {
 	events []TraceEvent
 }
 
+// Emit 把 trace 事件追加到测试 sink 中，便于断言。
 func (s *recordingTraceSink) Emit(event TraceEvent) {
 	s.events = append(s.events, event)
 }

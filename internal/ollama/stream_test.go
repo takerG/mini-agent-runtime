@@ -14,10 +14,12 @@ type flushingBuffer struct {
 	flushes int
 }
 
+// Flush 记录测试 writer 被流式处理逻辑刷新了一次。
 func (b *flushingBuffer) Flush() {
 	b.flushes++
 }
 
+// TestStreamChatContentWritesMessageContentChunks 验证流式解析会写出每个 message.content chunk。
 func TestStreamChatContentWritesMessageContentChunks(t *testing.T) {
 	input := strings.NewReader(
 		`{"message":{"content":"hello"}}` + "\n" +
@@ -35,6 +37,7 @@ func TestStreamChatContentWritesMessageContentChunks(t *testing.T) {
 	}
 }
 
+// TestStreamChatContentFlushesAfterEachMessageContentChunk 验证每次内容写入后都会触发 Flush。
 func TestStreamChatContentFlushesAfterEachMessageContentChunk(t *testing.T) {
 	input := strings.NewReader(
 		`{"message":{"content":"a"}}` + "\n" +
@@ -55,6 +58,7 @@ func TestStreamChatContentFlushesAfterEachMessageContentChunk(t *testing.T) {
 	}
 }
 
+// TestStreamChatContentAndCaptureReturnsFullAssistantMessage 验证流式输出的同时能捕获完整助手文本。
 func TestStreamChatContentAndCaptureReturnsFullAssistantMessage(t *testing.T) {
 	input := strings.NewReader(
 		`{"message":{"content":"hello"}}` + "\n" +
@@ -79,6 +83,7 @@ func TestStreamChatContentAndCaptureReturnsFullAssistantMessage(t *testing.T) {
 	}
 }
 
+// TestStreamChatMessageBeforeContentHookRunsOnceBeforeFirstWrite 验证首个内容写入前 hook 只执行一次。
 func TestStreamChatMessageBeforeContentHookRunsOnceBeforeFirstWrite(t *testing.T) {
 	input := strings.NewReader(
 		`{"message":{"content":"a"}}` + "\n" +
@@ -111,6 +116,7 @@ func TestStreamChatMessageBeforeContentHookRunsOnceBeforeFirstWrite(t *testing.T
 	}
 }
 
+// TestStreamChatContentReturnsDecodeErrorForInvalidJSON 验证非法 JSON 会返回解码错误。
 func TestStreamChatContentReturnsDecodeErrorForInvalidJSON(t *testing.T) {
 	input := strings.NewReader(`{"message":`)
 	var output bytes.Buffer
@@ -123,10 +129,12 @@ func TestStreamChatContentReturnsDecodeErrorForInvalidJSON(t *testing.T) {
 
 type writerFunc func([]byte) (int, error)
 
+// Write 让测试可以用函数模拟 io.Writer。
 func (fn writerFunc) Write(p []byte) (int, error) {
 	return fn(p)
 }
 
+// TestNewChatRequestWithMessagesBuildsConversationHistoryPayload 验证多轮消息会进入请求负载。
 func TestNewChatRequestWithMessagesBuildsConversationHistoryPayload(t *testing.T) {
 	messages := []Message{
 		{Role: "user", Content: "hello"},
@@ -153,6 +161,7 @@ func TestNewChatRequestWithMessagesBuildsConversationHistoryPayload(t *testing.T
 	}
 }
 
+// TestNewChatRequestBuildsStreamingChatPayload 验证单轮请求会构造流式 chat 负载。
 func TestNewChatRequestBuildsStreamingChatPayload(t *testing.T) {
 	req, err := NewChatRequest("http://localhost:11434/api/chat", "llama3.2", "say hi")
 	if err != nil {

@@ -20,6 +20,7 @@ type proxyChatRequest struct {
 	Model string `json:"model,omitempty"`
 }
 
+// NewChatProxyHandler 创建一个把简化 /chat 请求代理到本地 Ollama chat API 的 HTTP handler。
 func NewChatProxyHandler(endpoint string, defaultModel string, client *http.Client) http.Handler {
 	// 把 http.Client 作为参数传进来，方便测试时注入假的客户端。
 	// 真实运行时传 nil 或 http.DefaultClient 即可。

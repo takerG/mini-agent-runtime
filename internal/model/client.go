@@ -41,6 +41,7 @@ type ChatResult struct {
 	ToolCalls []ollama.ToolCall
 }
 
+// NewClient 创建模型客户端，并为 HTTP client 和 trace hooks 填充默认值。
 func NewClient(options Options) *Client {
 	httpClient := options.HTTP
 	if httpClient == nil {
@@ -59,6 +60,7 @@ func NewClient(options Options) *Client {
 	}
 }
 
+// Chat 向本地模型发送 chat 请求，流式输出内容并捕获最终文本与工具调用。
 func (c *Client) Chat(ctx context.Context, options ChatOptions) (ChatResult, error) {
 	modelName := options.Model
 	if modelName == "" {
