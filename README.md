@@ -106,6 +106,25 @@ If a tool does not exist or returns an error, the CLI does not exit immediately.
 
 Tools are managed through `ToolRegistry` in `internal/tools`. To add a new tool, implement the `Tool` interface with `Name()`, `Description()`, `Definition()`, and `Execute(ctx, args)`, then register the tool instance in `NewDefaultToolRegistry`.
 
+The CLI wiring also supports dependency injection through `ChatLoopDependencies`, so tests or future runtimes can provide a custom `ToolRegistry`, memory manager, trace hooks, or error reporter without changing the CLI loop.
+
+## Agent Memory
+
+The runtime includes a composable memory layer in `internal/memory`. Memory is controlled by code, not CLI flags, so different agent deployments can switch or combine memory strategies without changing the user-facing interface.
+
+The first version includes:
+
+- `WindowMemory`: session memory for the most recent N completed turns.
+- `SummaryMemory`: user or session memory that maintains a rolling summary. The default summarizer is local and string-based; it can be replaced with a model summarizer later.
+- `DBSessionStateMemory`: session state access functions backed by an in-memory map for now. It models future DB access without calling an external database.
+
+`MemoryManager` composes providers and exposes one `Context` read path plus one `AppendTurn` write path. The same manager is used by `chat`, `plan`, and `strict-plan` modes. Memory context is injected as a system message only when a provider has data.
+
+User memory and session memory are separated by `memory.Scope`:
+
+- `ScopeUser`: durable user-level facts that can be shared across sessions.
+- `ScopeSession`: current-session context, recent turns, and session state.
+
 Example prompts:
 
 ```text
@@ -144,10 +163,12 @@ The server posts to `http://localhost:11434/api/chat` with `stream: true`, reads
 The entrypoint is intentionally thin:
 
 - `main.go`: parses flags, chooses CLI or HTTP server mode, wires components together.
-- `internal/agent`: owns the multi-turn CLI loop, runtime dependency wiring, tool-call rounds, history, and tool error feedback.
+- `internal/agent`: owns the multi-turn CLI loop, `Session` history/memory state, mode runners, runtime dependency wiring, and tool error feedback.
 - `internal/model`: owns shared model invocation, request/response trace events, HTTP status handling, and stream capture.
+- `internal/memory`: owns memory providers, user/session scope separation, memory composition, and local simulated session state.
+- `internal/prompts`: owns reusable planner, executor, strict planner, and responder prompt templates.
 - `internal/planner`: asks the model for a structured JSON plan before execution.
-- `internal/executor`: follows a plan, reuses native tool calls, and streams the final answer.
+- `internal/executor`: follows hybrid plans with native tool calls, directly executes strict executable plans, and streams the final answer.
 - `internal/ollama`: owns Ollama-compatible protocol types, request payload construction, and streaming NDJSON parsing.
 - `internal/tools`: owns `Tool`, `ToolRegistry`, built-in tools, and tool argument validation.
 - `internal/trace`: owns structured trace events, hooks, and the stderr logger sink.

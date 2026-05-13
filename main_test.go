@@ -2,8 +2,10 @@ package main
 
 import (
 	"flag"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"mini-agent-runtime/internal/agent"
 )
@@ -49,6 +51,25 @@ func TestCLIUsageShowsDoubleDashFlags(t *testing.T) {
 	for _, want := range []string{"--mode", "--trace", "--model", "--think"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("usage = %q, want to contain %s", got, want)
+		}
+	}
+}
+
+// TestNewHTTPServerConfiguresTimeouts 验证 HTTP proxy server 会显式配置超时，避免默认 server 缺少连接保护。
+func TestNewHTTPServerConfiguresTimeouts(t *testing.T) {
+	server := newHTTPServer("127.0.0.1:0", http.NotFoundHandler())
+
+	if got, want := server.Addr, "127.0.0.1:0"; got != want {
+		t.Fatalf("server addr = %q, want %q", got, want)
+	}
+	for name, value := range map[string]time.Duration{
+		"ReadHeaderTimeout": server.ReadHeaderTimeout,
+		"ReadTimeout":       server.ReadTimeout,
+		"WriteTimeout":      server.WriteTimeout,
+		"IdleTimeout":       server.IdleTimeout,
+	} {
+		if value <= 0 {
+			t.Fatalf("%s = %s, want positive timeout", name, value)
 		}
 	}
 }

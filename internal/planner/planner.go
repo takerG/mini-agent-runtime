@@ -4,34 +4,46 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"strings"
 
 	apperrors "mini-agent-runtime/internal/errors"
 	modelclient "mini-agent-runtime/internal/model"
 	"mini-agent-runtime/internal/ollama"
+	"mini-agent-runtime/internal/prompts"
 )
 
+// Plan 表示 Hybrid Planner 生成的自然语言执行计划。
 type Plan struct {
 	Goal  string `json:"goal"`
 	Steps []Step `json:"steps"`
 }
 
+// Step 表示 Hybrid Planner 中的一步任务，以及可选的工具提示。
 type Step struct {
 	Task     string `json:"task"`
 	ToolHint string `json:"tool_hint,omitempty"`
 }
 
+// Planner 负责把用户目标拆解成 executor 可以继续执行的计划。
 type Planner struct {
-	modelClient *modelclient.Client
+	modelClient   *modelclient.Client
+	memoryContext string
+	toolHints     []string
 }
 
+// Options 描述创建 Planner 时需要注入的依赖和上下文。
 type Options struct {
-	ModelClient *modelclient.Client
+	ModelClient   *modelclient.Client
+	MemoryContext string
+	ToolHints     []string
 }
 
 // NewPlanner 创建 planner 组件，用于把用户目标拆解成执行计划。
 func NewPlanner(options Options) *Planner {
-	return &Planner{modelClient: options.ModelClient}
+	return &Planner{
+		modelClient:   options.ModelClient,
+		memoryContext: options.MemoryContext,
+		toolHints:     append([]string(nil), options.ToolHints...),
+	}
 }
 
 // Plan 使用默认 context 为用户输入生成自然语言执行计划。
@@ -42,9 +54,12 @@ func (p *Planner) Plan(userMessage string) (Plan, error) {
 // PlanWithContext 调用模型生成 planner JSON，并解析成内部 Plan 结构。
 func (p *Planner) PlanWithContext(ctx context.Context, userMessage string) (Plan, error) {
 	messages := []ollama.Message{
-		{Role: "system", Content: plannerSystemPrompt()},
-		{Role: "user", Content: userMessage},
+		{Role: "system", Content: prompts.PlannerSystemPrompt(p.toolHints)},
 	}
+	if p.memoryContext != "" {
+		messages = append(messages, ollama.Message{Role: "system", Content: p.memoryContext})
+	}
+	messages = append(messages, ollama.Message{Role: "user", Content: userMessage})
 	result, err := p.modelClient.Chat(ctx, modelclient.ChatOptions{
 		Phase:     "planner",
 		ToolRound: 0,
@@ -76,16 +91,4 @@ func ParsePlan(content string) (Plan, error) {
 		plan.Steps = []Step{{Task: plan.Goal}}
 	}
 	return plan, nil
-}
-
-// plannerSystemPrompt 返回自然语言 planner 阶段的系统提示词。
-func plannerSystemPrompt() string {
-	return strings.Join([]string{
-		"You are the planner in a planner/executor agent runtime.",
-		"Create a concise execution plan for the executor.",
-		"Return only JSON with this shape:",
-		`{"goal":"short goal","steps":[{"task":"specific step","tool_hint":"optional tool name"}]}`,
-		"Available tool hints are current_time and calculator.",
-		"Do not execute tools. Do not answer the user directly.",
-	}, "\n")
 }

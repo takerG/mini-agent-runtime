@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 
 	apperrors "mini-agent-runtime/internal/errors"
 	modelclient "mini-agent-runtime/internal/model"
 	"mini-agent-runtime/internal/ollama"
 	"mini-agent-runtime/internal/planner"
+	"mini-agent-runtime/internal/prompts"
 	"mini-agent-runtime/internal/tools"
 	tracing "mini-agent-runtime/internal/trace"
 )
@@ -18,21 +18,23 @@ import (
 const maxToolRounds = 4
 
 type Options struct {
-	ModelClient *modelclient.Client
-	Registry    *tools.ToolRegistry
-	Trace       *tracing.TraceHooks
-	Reporter    *apperrors.Reporter
-	Stdout      io.Writer
-	ShowProcess bool
+	ModelClient   *modelclient.Client
+	Registry      *tools.ToolRegistry
+	Trace         *tracing.TraceHooks
+	Reporter      *apperrors.Reporter
+	Stdout        io.Writer
+	ShowProcess   bool
+	MemoryContext string
 }
 
 type Executor struct {
-	modelClient *modelclient.Client
-	registry    *tools.ToolRegistry
-	trace       *tracing.TraceHooks
-	reporter    *apperrors.Reporter
-	stdout      io.Writer
-	showProcess bool
+	modelClient   *modelclient.Client
+	registry      *tools.ToolRegistry
+	trace         *tracing.TraceHooks
+	reporter      *apperrors.Reporter
+	stdout        io.Writer
+	showProcess   bool
+	memoryContext string
 }
 
 // NewExecutor 创建执行器，并补齐输出、trace 和 reporter 的默认依赖。
@@ -51,12 +53,13 @@ func NewExecutor(options Options) *Executor {
 	}
 
 	return &Executor{
-		modelClient: options.ModelClient,
-		registry:    options.Registry,
-		trace:       traceHooks,
-		reporter:    reporter,
-		stdout:      stdout,
-		showProcess: options.ShowProcess,
+		modelClient:   options.ModelClient,
+		registry:      options.Registry,
+		trace:         traceHooks,
+		reporter:      reporter,
+		stdout:        stdout,
+		showProcess:   options.ShowProcess,
+		memoryContext: options.MemoryContext,
 	}
 }
 
@@ -77,8 +80,11 @@ func (e *Executor) Execute(ctx context.Context, userMessage string, plan planner
 
 	messages := []ollama.Message{
 		{Role: "system", Content: executorSystemPrompt(plan)},
-		{Role: "user", Content: userMessage},
 	}
+	if e.memoryContext != "" {
+		messages = append(messages, ollama.Message{Role: "system", Content: e.memoryContext})
+	}
+	messages = append(messages, ollama.Message{Role: "user", Content: userMessage})
 	allToolCalls := []ollama.ToolCall{}
 	allObservations := []toolObservation{}
 
@@ -202,13 +208,5 @@ func executorSystemPrompt(plan planner.Plan) string {
 	if err != nil {
 		planJSON = []byte(fmt.Sprintf(`{"goal":%q}`, plan.Goal))
 	}
-	return strings.Join([]string{
-		"You are the executor in a planner/executor agent runtime.",
-		"Follow the plan, call tools when useful, and produce the final user-facing answer.",
-		"After tool results are available, synthesize them into a concise natural-language answer in the user's language.",
-		"Do not answer with only raw observation values unless the user explicitly asks for raw data.",
-		"The CLI renders [plan] and [observation] sections, so do not include those labels yourself.",
-		"Execution plan:",
-		string(planJSON),
-	}, "\n")
+	return prompts.ExecutorSystemPrompt(string(planJSON))
 }

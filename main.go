@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"mini-agent-runtime/internal/agent"
 	apperrors "mini-agent-runtime/internal/errors"
@@ -14,6 +15,7 @@ import (
 	tracing "mini-agent-runtime/internal/trace"
 )
 
+// cliOptions 保存入口层解析后的 CLI 配置。
 type cliOptions struct {
 	endpoint    string
 	model       string
@@ -42,7 +44,7 @@ func main() {
 
 	if options.serveAddr != "" {
 		handler := server.NewChatProxyHandler(options.endpoint, options.model, http.DefaultClient)
-		if err := http.ListenAndServe(options.serveAddr, handler); err != nil {
+		if err := newHTTPServer(options.serveAddr, handler).ListenAndServe(); err != nil {
 			exitWithError(err, options.debug)
 		}
 		return
@@ -111,6 +113,18 @@ func newCLIFlagSet(output io.Writer) *flag.FlagSet {
 	return flags
 }
 
+// newHTTPServer 创建带超时保护的 HTTP server，避免 proxy 模式使用 Go 默认 server 暴露连接悬挂风险。
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      10 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+	}
+}
+
 // getenvDefault 读取环境变量，当环境变量为空时返回传入的默认值。
 func getenvDefault(name string, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(name))
@@ -123,7 +137,7 @@ func getenvDefault(name string, fallback string) string {
 // exitWithError 统一处理入口层致命错误的日志输出和进程退出。
 func exitWithError(err error, debug bool) {
 	// main 是程序最外层，只负责把致命错误交给统一 reporter。
-	// 真正的发生节点应该由内部包 Wrap 标注；main 这里只代表错误传播到了入口。
+	// 真正的发生节点应该由内部包 Wrap 标注，main 这里只代表错误传播到了入口。
 	reporter := apperrors.NewReporter(debug, os.Stderr)
 	reporter.Log(err)
 	reporter.Debug(err)
