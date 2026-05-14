@@ -853,7 +853,7 @@ func TestRuntimeRunsPlannerExecutorTurnWithSharedDependencies(t *testing.T) {
 		Stdout: &stdout,
 	})
 
-	answer, err := runtime.RunPlannerExecutorTurn(t.Context(), "23 * 19?")
+	answer, err := runtime.RunPlannerExecutorTurn(context.Background(), "23 * 19?")
 	if err != nil {
 		t.Fatalf("RunPlannerExecutorTurn returned error: %v", err)
 	}
@@ -905,7 +905,7 @@ func TestRuntimePlannerExecutorTurnUsesMemoryContext(t *testing.T) {
 
 	query := memory.Query{UserID: "u1", SessionID: "s1"}
 	manager := memory.NewManager(memory.NewWindowMemory(memory.WindowMemoryOptions{Scope: memory.ScopeSession, MaxTurns: 2}))
-	if err := manager.AppendTurn(t.Context(), query, memory.Turn{User: "remember color", Assistant: "blue"}); err != nil {
+	if err := manager.AppendTurn(context.Background(), query, memory.Turn{User: "remember color", Assistant: "blue"}); err != nil {
 		t.Fatalf("AppendTurn returned error: %v", err)
 	}
 	var stdout strings.Builder
@@ -923,7 +923,7 @@ func TestRuntimePlannerExecutorTurnUsesMemoryContext(t *testing.T) {
 		MemoryQuery: query,
 	})
 
-	answer, err := runtime.RunPlannerExecutorTurn(t.Context(), "what color?")
+	answer, err := runtime.RunPlannerExecutorTurn(context.Background(), "what color?")
 	if err != nil {
 		t.Fatalf("RunPlannerExecutorTurn returned error: %v", err)
 	}
@@ -988,7 +988,7 @@ func TestRuntimeRunsStrictPlannerExecutorTurnWithoutModelToolCalls(t *testing.T)
 		Stdout: &stdout,
 	})
 
-	answer, err := runtime.RunStrictPlannerExecutorTurn(t.Context(), "calculate 23 * 19 and get current time")
+	answer, err := runtime.RunStrictPlannerExecutorTurn(context.Background(), "calculate 23 * 19 and get current time")
 	if err != nil {
 		t.Fatalf("RunStrictPlannerExecutorTurn returned error: %v", err)
 	}
@@ -1077,7 +1077,7 @@ func TestRuntimeStrictPlannerPassesRegisteredToolsToPlanner(t *testing.T) {
 		Stdout: &stdout,
 	})
 
-	answer, err := runtime.RunStrictPlannerExecutorTurn(t.Context(), "query latency metric")
+	answer, err := runtime.RunStrictPlannerExecutorTurn(context.Background(), "query latency metric")
 	if err != nil {
 		t.Fatalf("RunStrictPlannerExecutorTurn returned error: %v", err)
 	}
@@ -1153,7 +1153,7 @@ func TestRuntimeStrictPlannerUsesMemoryContext(t *testing.T) {
 
 	query := memory.Query{UserID: "u1", SessionID: "s1"}
 	manager := memory.NewManager(memory.NewSummaryMemory(memory.SummaryMemoryOptions{Scope: memory.ScopeUser}))
-	if err := manager.AppendTurn(t.Context(), query, memory.Turn{User: "remember city", Assistant: "Tokyo"}); err != nil {
+	if err := manager.AppendTurn(context.Background(), query, memory.Turn{User: "remember city", Assistant: "Tokyo"}); err != nil {
 		t.Fatalf("AppendTurn returned error: %v", err)
 	}
 	var stdout strings.Builder
@@ -1171,7 +1171,7 @@ func TestRuntimeStrictPlannerUsesMemoryContext(t *testing.T) {
 		MemoryQuery: query,
 	})
 
-	answer, err := runtime.RunStrictPlannerExecutorTurn(t.Context(), "what city?")
+	answer, err := runtime.RunStrictPlannerExecutorTurn(context.Background(), "what city?")
 	if err != nil {
 		t.Fatalf("RunStrictPlannerExecutorTurn returned error: %v", err)
 	}
@@ -1236,7 +1236,7 @@ func TestRuntimeStrictPlannerExecutorFeedsToolErrorsIntoObservations(t *testing.
 		Stdout: &stdout,
 	})
 
-	_, err := runtime.RunStrictPlannerExecutorTurn(t.Context(), "use missing tool")
+	_, err := runtime.RunStrictPlannerExecutorTurn(context.Background(), "use missing tool")
 	if err != nil {
 		t.Fatalf("RunStrictPlannerExecutorTurn returned error: %v", err)
 	}

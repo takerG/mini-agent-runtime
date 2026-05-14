@@ -322,7 +322,7 @@ func (t *TraceLogger) Emit(event TraceEvent) {
 	if t == nil || !t.enabled || t.writer == nil {
 		return
 	}
-	fmt.Fprintf(t.writer, "[trace] %s: %s\n", event.Name, formatTraceData(event.Data))
+	_, _ = fmt.Fprintf(t.writer, "[trace] %s: %s\n", event.Name, formatTraceData(event.Data))
 }
 
 // Log 保留兼容旧调用的格式化 trace 日志输出能力。
@@ -331,7 +331,7 @@ func (t *TraceLogger) Log(step string, format string, args ...any) {
 		return
 	}
 	message := fmt.Sprintf(format, args...)
-	fmt.Fprintf(t.writer, "[trace] %s: %s\n", step, message)
+	_, _ = fmt.Fprintf(t.writer, "[trace] %s: %s\n", step, message)
 }
 
 // MultiSink 把同一份 trace 事件广播到多个 sink。
@@ -403,10 +403,10 @@ func (l *TraceJSONLLogger) Emit(event TraceEvent) {
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		fmt.Fprintf(l.writer, `{"name":"trace_marshal_error","error":%q}`+"\n", err.Error())
+		_, _ = fmt.Fprintf(l.writer, `{"name":"trace_marshal_error","error":%q}`+"\n", err.Error())
 		return
 	}
-	fmt.Fprintf(l.writer, "%s\n", data)
+	_, _ = fmt.Fprintf(l.writer, "%s\n", data)
 }
 
 // formatTraceData 根据 trace payload 类型生成可读的一行日志内容。

@@ -13,6 +13,10 @@ type echoTool struct {
 	seenContext context.Context
 }
 
+type registryContextKey string
+
+const requestIDContextKey registryContextKey = "request_id"
+
 // Name 返回测试 echo 工具的注册名称。
 func (t *echoTool) Name() string {
 	return "echo"
@@ -55,7 +59,7 @@ func TestToolRegistryRegistersToolImplementations(t *testing.T) {
 		t.Fatalf("definition name = %q, want %q", got, want)
 	}
 
-	ctx := context.WithValue(context.Background(), "request_id", "test-request")
+	ctx := context.WithValue(context.Background(), requestIDContextKey, "test-request")
 	result, err := registry.Execute(ctx, ollama.ToolCall{
 		Function: ollama.ToolFunctionCall{
 			Name: "echo",

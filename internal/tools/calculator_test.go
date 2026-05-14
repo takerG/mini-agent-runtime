@@ -12,7 +12,7 @@ import (
 
 // TestCalculatorToolImplementsToolInterface 验证 calculator 工具实现了 Tool 接口契约。
 func TestCalculatorToolImplementsToolInterface(t *testing.T) {
-	var tool Tool = NewCalculatorTool()
+	tool := NewCalculatorTool()
 
 	if got, want := tool.Name(), "calculator"; got != want {
 		t.Fatalf("tool name = %q, want %q", got, want)

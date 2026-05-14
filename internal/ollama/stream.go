@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -47,10 +48,17 @@ func StreamChatMessageAndCaptureWithOptions(r io.Reader, options StreamOptions) 
 		w = io.Discard
 	}
 
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
+	reader := bufio.NewReader(r)
+	for {
+		rawLine, readErr := reader.ReadBytes('\n')
+		line := bytes.TrimSpace(rawLine)
 		if len(line) == 0 {
+			if readErr != nil {
+				if errors.Is(readErr, io.EOF) {
+					break
+				}
+				return captured.String(), toolCalls, apperrors.Wrap(apperrors.NodeOllamaStream, apperrors.CodeStreamReadFailed, readErr, "read chat response")
+			}
 			continue
 		}
 
@@ -64,29 +72,29 @@ func StreamChatMessageAndCaptureWithOptions(r io.Reader, options StreamOptions) 
 		if len(response.Message.ToolCalls) > 0 {
 			toolCalls = append(toolCalls, response.Message.ToolCalls...)
 		}
-		if response.Message.Content == "" {
-			continue
-		}
+		if response.Message.Content != "" {
+			if !contentStarted && options.BeforeContent != nil {
+				if err := options.BeforeContent(); err != nil {
+					return captured.String(), toolCalls, apperrors.Wrap(apperrors.NodeOllamaStream, apperrors.CodeStreamWriteFailed, err, "run before content hook")
+				}
+			}
+			contentStarted = true
 
-		if !contentStarted && options.BeforeContent != nil {
-			if err := options.BeforeContent(); err != nil {
-				return captured.String(), toolCalls, apperrors.Wrap(apperrors.NodeOllamaStream, apperrors.CodeStreamWriteFailed, err, "run before content hook")
+			if _, err := io.WriteString(w, response.Message.Content); err != nil {
+				return captured.String(), toolCalls, apperrors.Wrap(apperrors.NodeOllamaStream, apperrors.CodeStreamWriteFailed, err, "write chat content")
+			}
+			captured.WriteString(response.Message.Content)
+
+			if flushWriter, ok := w.(flusher); ok {
+				flushWriter.Flush()
 			}
 		}
-		contentStarted = true
-
-		if _, err := io.WriteString(w, response.Message.Content); err != nil {
-			return captured.String(), toolCalls, apperrors.Wrap(apperrors.NodeOllamaStream, apperrors.CodeStreamWriteFailed, err, "write chat content")
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return captured.String(), toolCalls, apperrors.Wrap(apperrors.NodeOllamaStream, apperrors.CodeStreamReadFailed, readErr, "read chat response")
 		}
-		captured.WriteString(response.Message.Content)
-
-		if flushWriter, ok := w.(flusher); ok {
-			flushWriter.Flush()
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return captured.String(), toolCalls, apperrors.Wrap(apperrors.NodeOllamaStream, apperrors.CodeStreamReadFailed, err, "read chat response")
 	}
 	return captured.String(), toolCalls, nil
 }

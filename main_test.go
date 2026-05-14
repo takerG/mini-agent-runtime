@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"net/http"
 	"strings"
@@ -62,7 +63,7 @@ func TestCLIUsageShowsDoubleDashFlags(t *testing.T) {
 	var output strings.Builder
 
 	_, err := parseCLIOptions([]string{"--help"}, &output)
-	if err != flag.ErrHelp {
+	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("parseCLIOptions help error = %v, want %v", err, flag.ErrHelp)
 	}
 

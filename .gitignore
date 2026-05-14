@@ -1,3 +1,4 @@
 .gocache/
+.tools/
 mini-agent-runtime.exe
 .idea/

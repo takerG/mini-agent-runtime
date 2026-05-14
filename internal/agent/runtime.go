@@ -127,16 +127,18 @@ func (r *Runtime) runPlannerExecutorTurn(ctx context.Context, userMessage string
 
 	executorStep, executorTrace := startLifecycleStep(r.trace, recorder, "", lifecycle.StepTypeExecutor, "hybrid.executor", map[string]any{"steps": len(plan.Steps)})
 	runtimeExecutor := executor.NewExecutor(executor.Options{
-		ModelClient:   r.modelClient,
-		Registry:      r.tools,
-		ToolPolicy:    r.toolPolicy,
-		Trace:         r.trace,
-		Reporter:      r.reporter,
-		Stdout:        r.stdout,
+		ModelClient: r.modelClient,
+		Dependencies: executor.Dependencies{
+			Registry:     r.tools,
+			ToolPolicy:   r.toolPolicy,
+			Trace:        r.trace,
+			Reporter:     r.reporter,
+			Stdout:       r.stdout,
+			Recorder:     recorder,
+			ParentStepID: executorStep.ID,
+		},
 		ShowProcess:   true,
 		MemoryContext: memoryContext,
-		Recorder:      recorder,
-		ParentStepID:  executorStep.ID,
 	})
 	answer, err := runtimeExecutor.Execute(ctx, userMessage, plan)
 	if err != nil {
@@ -199,14 +201,16 @@ func (r *Runtime) runStrictPlannerExecutorTurn(ctx context.Context, userMessage 
 
 	executorStep, executorTrace := startLifecycleStep(r.trace, recorder, "", lifecycle.StepTypeExecutor, "strict.executor", map[string]any{"steps": len(plan.Steps)})
 	observations := executor.NewStrictExecutor(executor.StrictExecutorOptions{
-		Registry:     r.tools,
-		ToolPolicy:   r.toolPolicy,
-		Trace:        r.trace,
-		Reporter:     r.reporter,
-		Stdout:       r.stdout,
-		ShowProcess:  true,
-		Recorder:     recorder,
-		ParentStepID: executorStep.ID,
+		Dependencies: executor.Dependencies{
+			Registry:     r.tools,
+			ToolPolicy:   r.toolPolicy,
+			Trace:        r.trace,
+			Reporter:     r.reporter,
+			Stdout:       r.stdout,
+			Recorder:     recorder,
+			ParentStepID: executorStep.ID,
+		},
+		ShowProcess: true,
 	}).Execute(ctx, plan)
 	addLifecycleObservation(executorTrace, recorder, executorStep, lifecycle.ObservationTypeToolResult, "strict.executor", fmt.Sprintf("%d observations", len(observations)), nil)
 	finishLifecycleStep(executorTrace, recorder, executorStep, nil)

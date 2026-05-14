@@ -4,12 +4,45 @@
 
 ## Go 验证
 
-代码变更后运行：
+代码变更后优先运行统一检查：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1
+```
+
+如果本机安装了 `make`，也可以运行：
+
+```powershell
+make check
+```
+
+最小验证命令：
 
 ```powershell
 $env:GOCACHE = Join-Path (Get-Location) ".gocache"
 go test -count=1 ./...
 go build -buildvcs=false ./...
+```
+
+`scripts/check.ps1` 会执行：
+
+- `gofmt` 检查。
+- CRLF 检查。
+- `go vet ./...`。
+- `go test -count=1 ./...`。
+- `staticcheck ./...`。
+- `golangci-lint run`。
+
+如果 `staticcheck` 不存在，安装：
+
+```powershell
+go install honnef.co/go/tools/cmd/staticcheck@latest
+```
+
+如果 `golangci-lint` 不存在，按官方文档安装：
+
+```text
+https://golangci-lint.run/welcome/install/
 ```
 
 ## 文档与换行验证

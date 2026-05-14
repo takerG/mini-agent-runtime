@@ -20,6 +20,30 @@ type proxyChatRequest struct {
 	Model string `json:"model,omitempty"`
 }
 
+// streamingResponseWriter 记录流式响应是否已经写出，避免中途失败后再写 http.Error 污染响应体。
+type streamingResponseWriter struct {
+	http.ResponseWriter
+	wrote bool
+}
+
+// Write 标记响应已经开始写出，并把数据转交给底层 ResponseWriter。
+func (w *streamingResponseWriter) Write(data []byte) (int, error) {
+	w.wrote = true
+	return w.ResponseWriter.Write(data)
+}
+
+// Flush 将流式刷新转交给底层 ResponseWriter。
+func (w *streamingResponseWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// HasWritten 返回当前响应是否已经写出过 body。
+func (w *streamingResponseWriter) HasWritten() bool {
+	return w.wrote
+}
+
 // NewChatProxyHandler 创建一个把简化 /chat 请求代理到本地 Ollama chat API 的 HTTP handler。
 func NewChatProxyHandler(endpoint string, defaultModel string, client *http.Client) http.Handler {
 	// 把 http.Client 作为参数传进来，方便测试时注入假的客户端。
@@ -73,7 +97,9 @@ func NewChatProxyHandler(endpoint string, defaultModel string, client *http.Clie
 			http.Error(w, apperrors.Wrap(apperrors.NodeServerProxy, apperrors.CodeUpstreamRequestFailed, err, "post chat request").Error(), http.StatusBadGateway)
 			return
 		}
-		defer upstreamResp.Body.Close()
+		defer func() {
+			_ = upstreamResp.Body.Close()
+		}()
 
 		if upstreamResp.StatusCode < 200 || upstreamResp.StatusCode > 299 {
 			http.Error(w, apperrors.New(apperrors.NodeServerProxy, apperrors.CodeUpstreamStatusFailed, fmt.Sprintf("chat request failed: %s", upstreamResp.Status)).Error(), http.StatusBadGateway)
@@ -94,8 +120,13 @@ func NewChatProxyHandler(endpoint string, defaultModel string, client *http.Clie
 		//   上游：本地模型按行返回 JSON
 		//   中间：ollama.StreamChatContent 解析每行 JSON，取出 message.content
 		//   下游：把 content 立即写给 HTTP 调用方，并在每个 chunk 后 Flush
-		if err := ollama.StreamChatContent(upstreamResp.Body, w); err != nil {
-			http.Error(w, apperrors.Wrap(apperrors.NodeServerProxy, apperrors.CodeHTTPProxyFailed, err, "stream proxy failed").Error(), http.StatusBadGateway)
+		streamWriter := &streamingResponseWriter{ResponseWriter: w}
+		if err := ollama.StreamChatContent(upstreamResp.Body, streamWriter); err != nil {
+			wrappedErr := apperrors.Wrap(apperrors.NodeServerProxy, apperrors.CodeHTTPProxyFailed, err, "stream proxy failed")
+			if streamWriter.HasWritten() {
+				return
+			}
+			http.Error(w, wrappedErr.Error(), http.StatusBadGateway)
 			return
 		}
 	})

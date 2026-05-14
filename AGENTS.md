@@ -5,15 +5,18 @@
 ## 必读顺序
 
 1. 修改任何代码、测试、文档或工程结构前，先读取本文件。
-2. 需要了解完整项目约束时，读取 `.codex/skills/mini-agent-runtime/SKILL.md`。
-3. 需要改动架构、CLI、tools、memory、trace、errors、prompts 或换行策略时，继续读取 `.codex/skills/mini-agent-runtime/references/project-constraints.md`。
-4. 需要验证变更时，读取 `.codex/skills/mini-agent-runtime/references/verification.md`。
+2. 需要了解项目级代码质量、lint、错误处理和提交前自检时，读取 `CODING_SPEC.md`。
+3. 需要了解完整项目约束时，读取 `.codex/skills/mini-agent-runtime/SKILL.md`。
+4. 需要改动架构、CLI、tools、memory、trace、errors、prompts 或换行策略时，继续读取 `.codex/skills/mini-agent-runtime/references/project-constraints.md`。
+5. 需要验证变更时，读取 `.codex/skills/mini-agent-runtime/references/verification.md`。
 
 ## 核心约束
 
 - 入口层保持轻量：根目录只保留 `main.go` 一个 Go 入口文件，其他能力必须组件化放入 `internal/` 下的包。
 - 默认使用 CRLF 换行；不要提交 `.idea/`、`.gocache/`、可执行文件或其他本地生成物。
 - 所有 Go 函数和方法必须有中文 GoDoc 注释，且注释必须以函数名或方法名开头。
+- 错误判断必须使用 `errors.Is` / `errors.As` 处理可能被 wrap 的错误；禁止用 `err == targetErr` 判断错误链。
+- 新增 goroutine 必须有明确退出条件；超时治理优先通过 `context.Context` 传递 deadline。
 - CLI 参数使用双横线形式，例如 `--mode`、`--trace`、`--trace-jsonl`、`--debug`、`--model`、`--think`。
 - 保持 `chat`、`plan`、`strict-plan` 三种模式的职责边界；不要把 planner、executor、runtime、model client、tools、lifecycle、trace、errors 混在一起。
 - 每次用户请求都必须能落到统一的 run lifecycle：`Run`、`Step`、`Observation`、`Result`。
@@ -36,8 +39,13 @@
 
 ```powershell
 $env:GOCACHE = Join-Path (Get-Location) ".gocache"
-go test -count=1 ./...
-go build -buildvcs=false ./...
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1
+```
+
+如果本机安装了 `make`，也可以运行：
+
+```powershell
+make check
 ```
 
 在文档、换行或工程文件变更后至少运行：

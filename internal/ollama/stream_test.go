@@ -58,6 +58,24 @@ func TestStreamChatContentFlushesAfterEachMessageContentChunk(t *testing.T) {
 	}
 }
 
+// TestStreamChatContentHandlesLongJSONLine 验证单行 JSON 超过 bufio.Scanner 默认上限时仍可正常流式解析。
+func TestStreamChatContentHandlesLongJSONLine(t *testing.T) {
+	longContent := strings.Repeat("x", 70*1024)
+	payload, err := json.Marshal(ChatResponse{Message: Message{Content: longContent}})
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	input := bytes.NewReader(append(payload, '\n'))
+	var output bytes.Buffer
+
+	if err := StreamChatContent(input, &output); err != nil {
+		t.Fatalf("StreamChatContent returned error: %v", err)
+	}
+	if got := output.String(); got != longContent {
+		t.Fatalf("output length = %d, want %d", len(got), len(longContent))
+	}
+}
+
 // TestStreamChatContentAndCaptureReturnsFullAssistantMessage 验证流式输出的同时能捕获完整助手文本。
 func TestStreamChatContentAndCaptureReturnsFullAssistantMessage(t *testing.T) {
 	input := strings.NewReader(

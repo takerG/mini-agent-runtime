@@ -10,7 +10,7 @@ import (
 
 // TestCurrentTimeToolImplementsToolInterface 验证 current_time 工具实现了 Tool 接口契约。
 func TestCurrentTimeToolImplementsToolInterface(t *testing.T) {
-	var tool Tool = NewCurrentTimeTool(func() time.Time {
+	tool := NewCurrentTimeTool(func() time.Time {
 		return time.Date(2026, 5, 2, 18, 30, 0, 0, time.FixedZone("CST", 8*60*60))
 	})
 

@@ -5,6 +5,7 @@
 ## Canonical Files
 
 - `AGENTS.md`：Codex 自动发现的根项目指令文件，负责声明必须遵守的核心规则和读取顺序。
+- `CODING_SPEC.md`：项目级代码质量、错误处理、lint、测试和提交前自检规范。
 - `.codex/skills/mini-agent-runtime/SKILL.md`：项目本地 skill 入口，描述什么时候使用 mini-agent-runtime 的工程规范。
 - `.codex/skills/mini-agent-runtime/references/project-constraints.md`：完整项目约束。
 - `.codex/skills/mini-agent-runtime/references/architecture.md`：包职责和扩展边界。
@@ -12,4 +13,4 @@
 
 ## Maintenance Rule
 
-后续新增长期约束时，优先更新 `.codex/skills/mini-agent-runtime/references/project-constraints.md`。如果约束会影响所有 Codex 会话的第一步行为，再同步更新 `AGENTS.md`。
+后续新增长期约束时，优先更新 `.codex/skills/mini-agent-runtime/references/project-constraints.md`。如果约束属于通用 Go 代码质量、lint 或提交前流程，同步更新 `CODING_SPEC.md`。如果约束会影响所有 Codex 会话的第一步行为，再同步更新 `AGENTS.md`。

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -50,7 +51,7 @@ func TestClientChatStreamsResponseAndEmitsFullTrace(t *testing.T) {
 		Trace:    tracing.NewTraceHooks(sink),
 	})
 
-	result, err := client.Chat(t.Context(), ChatOptions{
+	result, err := client.Chat(context.Background(), ChatOptions{
 		Phase:     "chat",
 		ToolRound: 1,
 		Messages: []ollama.Message{

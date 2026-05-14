@@ -10,6 +10,7 @@
 - MUST 后续新增函数时同步新增同风格注释，不等到集中补文档。
 - SHOULD 保持代码清晰、简洁、适合学习；避免为了抽象而抽象。
 - SHOULD 当函数参数列表过长或职责混杂时，优先抽象为 options/config 结构体或拆分组件。
+- MUST 遵守根目录 `CODING_SPEC.md` 中的 Go 质量、错误处理、lint、测试和提交前自检规范。
 
 ## 2. 文件格式
 
@@ -83,6 +84,7 @@
 ## 10. 错误处理
 
 - MUST 使用统一 errors 包接管错误处理能力。
+- MUST 对可能被 wrap 的错误使用标准库 `errors.Is` / `errors.As` 判断，禁止直接使用 `err == targetErr` 判断错误链。
 - MUST 维护稳定的错误码、运行节点和调用链信息。
 - MUST 提供面向模型理解的错误格式化能力，便于工具失败后交还给模型处理。
 - MUST 提供面向操作者的日志输出能力。
@@ -106,6 +108,7 @@
 - MUST `internal/tools` 负责工具接口、注册表、执行策略、内置工具和参数校验。
 - MUST `internal/planner` 负责 planner 输出结构和解析。
 - MUST `internal/executor` 负责 Hybrid 和 Strict Planner/Executor 的执行阶段。
+- MUST `internal/executor` 只消费 runtime 注入的共享依赖，不创建默认 `ToolRegistry`、`TraceHooks`、`Reporter` 或 `ExecutionPolicy`。
 - MUST `internal/memory` 负责 memory provider、scope、组合和本地模拟存储。
 - MUST `internal/prompts` 负责系统 prompt 和 prompt 构造。
 - MUST `internal/trace` 负责 trace 事件、run/step context、hooks 和 sink。
@@ -114,7 +117,9 @@
 
 ## 13. 验证要求
 
-- MUST 代码变更后优先运行 `go test -count=1 ./...` 和 `go build -buildvcs=false ./...`。
+- MUST 代码变更后优先运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1`，或在安装了 `make` 的环境运行 `make check`。
+- MUST `scripts/check.ps1` 至少覆盖 `gofmt` 检查、CRLF 检查、`go vet ./...`、`go test ./...`、`staticcheck ./...` 和 `golangci-lint run`。
+- MUST 最小验证保留 `go test -count=1 ./...` 和 `go build -buildvcs=false ./...`。
 - MUST 文档或换行相关变更后至少运行 `git diff --check`。
 - SHOULD 涉及函数新增、重命名或大规模改动后检查函数注释覆盖。
 - SHOULD 若默认 Go 全局 build cache 异常，优先使用项目内 `.gocache` 验证，不要清理用户全局缓存。

@@ -20,15 +20,9 @@ const maxToolRounds = 4
 
 type Options struct {
 	ModelClient   *modelclient.Client
-	Registry      *tools.ToolRegistry
-	ToolPolicy    tools.ExecutionPolicy
-	Trace         *tracing.TraceHooks
-	Reporter      *apperrors.Reporter
-	Stdout        io.Writer
+	Dependencies  Dependencies
 	ShowProcess   bool
 	MemoryContext string
-	Recorder      *lifecycle.Recorder
-	ParentStepID  string
 }
 
 type Executor struct {
@@ -46,41 +40,26 @@ type Executor struct {
 
 // NewExecutor 创建执行器，并补齐输出、trace 和 reporter 的默认依赖。
 func NewExecutor(options Options) *Executor {
-	stdout := options.Stdout
-	if stdout == nil {
-		stdout = io.Discard
-	}
-	traceHooks := options.Trace
-	if traceHooks == nil {
-		traceHooks = tracing.NewTraceHooks(nil)
-	}
-	reporter := options.Reporter
-	if reporter == nil {
-		reporter = apperrors.NewReporter(false, io.Discard)
-	}
-	toolPolicy := options.ToolPolicy
-	if toolPolicy.MaxAttempts == 0 {
-		toolPolicy = tools.DefaultExecutionPolicy()
-	}
+	dependencies := normalizeDependencies(options.Dependencies)
 
 	return &Executor{
 		modelClient:   options.ModelClient,
-		registry:      options.Registry,
-		toolPolicy:    toolPolicy,
-		trace:         traceHooks,
-		reporter:      reporter,
-		stdout:        stdout,
+		registry:      dependencies.Registry,
+		toolPolicy:    dependencies.ToolPolicy,
+		trace:         dependencies.Trace,
+		reporter:      dependencies.Reporter,
+		stdout:        dependencies.Stdout,
 		showProcess:   options.ShowProcess,
 		memoryContext: options.MemoryContext,
-		recorder:      options.Recorder,
-		parentStepID:  options.ParentStepID,
+		recorder:      dependencies.Recorder,
+		parentStepID:  dependencies.ParentStepID,
 	}
 }
 
 // Execute 根据 planner 生成的计划驱动模型和工具调用，并返回最终面向用户的回答。
 func (e *Executor) Execute(ctx context.Context, userMessage string, plan planner.Plan) (string, error) {
 	if e.registry == nil {
-		e.registry = tools.NewDefaultToolRegistry(nil)
+		return "", missingRegistryError("executor")
 	}
 
 	e.trace.ExecutorStart(tracing.ExecutorStartTrace{Steps: len(plan.Steps)})
@@ -181,7 +160,7 @@ type toolObservation struct {
 func (e *Executor) printPlan(toolCalls []ollama.ToolCall) {
 	_, _ = fmt.Fprintln(e.stdout, "[plan]")
 	for i, call := range toolCalls {
-		fmt.Fprintf(e.stdout, "%d. tool_call %s %s\n", i+1, call.Function.Name, formatToolArguments(call.Function.Arguments))
+		_, _ = fmt.Fprintf(e.stdout, "%d. tool_call %s %s\n", i+1, call.Function.Name, formatToolArguments(call.Function.Arguments))
 	}
 	_, _ = fmt.Fprintln(e.stdout)
 }
@@ -190,7 +169,7 @@ func (e *Executor) printPlan(toolCalls []ollama.ToolCall) {
 func (e *Executor) printObservations(observations []toolObservation) {
 	_, _ = fmt.Fprintln(e.stdout, "[observation]")
 	for i, observation := range observations {
-		fmt.Fprintf(e.stdout, "%d. %s -> %s\n", i+1, observation.Name, observation.Result)
+		_, _ = fmt.Fprintf(e.stdout, "%d. %s -> %s\n", i+1, observation.Name, observation.Result)
 	}
 	_, _ = fmt.Fprintln(e.stdout)
 }

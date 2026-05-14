@@ -83,7 +83,6 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 	stdin := options.Stdin
 	stdout := options.Stdout
 	stderr := options.Stderr
-	traceHooks := options.Trace
 	mode := options.Mode
 	if mode == "" {
 		mode = ModeChat
@@ -102,7 +101,7 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 		stderr = io.Discard
 	}
 	dependencies := normalizeChatLoopDependencies(options.Dependencies, options.Trace, options.Memory, options.Debug, stderr)
-	traceHooks = dependencies.Trace
+	traceHooks := dependencies.Trace
 	reporter := dependencies.Reporter
 	toolRegistry := dependencies.Tools
 	toolPolicy := dependencies.ToolPolicy
@@ -146,7 +145,7 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 
 	for {
 		if pending == "" {
-			fmt.Fprint(stderr, "You: ")
+			_, _ = fmt.Fprint(stderr, "You: ")
 			if !scanner.Scan() {
 				if err := scanner.Err(); err != nil {
 					return apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeInvalidUserInput, err, "read message")

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -21,11 +22,6 @@ type ExecutionPolicy struct {
 	MaxAttempts int
 	Allow       AllowFunc
 	Retryable   RetryableFunc
-}
-
-type toolExecutionResult struct {
-	result string
-	err    error
 }
 
 // DefaultExecutionPolicy 返回默认工具执行策略：单次执行、不超时、不自动重试。
@@ -77,19 +73,9 @@ func executeToolAttempt(ctx context.Context, tool Tool, args map[string]any, tim
 	}
 	defer cancel()
 
-	resultCh := make(chan toolExecutionResult, 1)
-	go func() {
-		result, err := tool.Execute(attemptCtx, args)
-		resultCh <- toolExecutionResult{result: result, err: err}
-	}()
-
-	select {
-	case result := <-resultCh:
-		return result.result, result.err
-	case <-attemptCtx.Done():
-		if timeout > 0 {
-			return "", apperrors.New(apperrors.NodeToolRegistry, apperrors.CodeToolExecutionFailed, fmt.Sprintf("tool %s timed out after %s", tool.Name(), timeout))
-		}
-		return "", attemptCtx.Err()
+	result, err := tool.Execute(attemptCtx, args)
+	if timeout > 0 && errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+		return "", apperrors.New(apperrors.NodeToolRegistry, apperrors.CodeToolExecutionFailed, fmt.Sprintf("tool %s timed out after %s", tool.Name(), timeout))
 	}
+	return result, err
 }

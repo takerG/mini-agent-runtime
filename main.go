@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -37,7 +38,7 @@ const (
 func main() {
 	options, err := parseCLIOptions(os.Args[1:], os.Stderr)
 	if err != nil {
-		if err == flag.ErrHelp {
+		if errors.Is(err, flag.ErrHelp) {
 			return
 		}
 		exitWithError(err, false)
@@ -55,7 +56,6 @@ func main() {
 	if err != nil {
 		exitWithError(err, options.debug)
 	}
-	defer traceCloser.Close()
 
 	err = agent.RunChatLoopWithOptions(agent.ChatLoopOptions{
 		Endpoint:    options.endpoint,
@@ -70,6 +70,9 @@ func main() {
 		Debug:       options.debug,
 		Mode:        options.mode,
 	})
+	if closeErr := traceCloser.Close(); closeErr != nil && err == nil {
+		err = fmt.Errorf("close trace sink: %w", closeErr)
+	}
 	if err != nil {
 		exitWithError(err, options.debug)
 	}
@@ -78,8 +81,8 @@ func main() {
 // parseCLIOptions 解析命令行参数，并把 flag 与环境变量合并成运行时需要的配置。
 func parseCLIOptions(args []string, output io.Writer) (cliOptions, error) {
 	flags := newCLIFlagSet(output)
-	endpoint := flags.String("url", getenvDefault("LOCAL_MODEL_CHAT_URL", defaultEndpoint), "chat API URL")
-	model := flags.String("model", getenvDefault("LOCAL_MODEL_NAME", defaultModel), "local model name")
+	endpoint := flags.String("url", getENVDefault("LOCAL_MODEL_CHAT_URL", defaultEndpoint), "chat API URL")
+	model := flags.String("model", getENVDefault("LOCAL_MODEL_NAME", defaultModel), "local model name")
 	think := flags.Bool("think", true, "hide model thinking output when true; show it when false")
 	trace := flags.Bool("trace", false, "write full agent trace logs to stderr")
 	traceJSONL := flags.String("trace-jsonl", "", "write structured JSONL trace events to this file")
@@ -133,11 +136,11 @@ func newCLIFlagSet(output io.Writer) *flag.FlagSet {
 	}
 	flags.SetOutput(output)
 	flags.Usage = func() {
-		fmt.Fprintf(output, "Usage: %s [options] [message]\n\nOptions:\n", flags.Name())
+		_, _ = fmt.Fprintf(output, "Usage: %s [options] [message]\n\nOptions:\n", flags.Name())
 		flags.VisitAll(func(flagValue *flag.Flag) {
-			fmt.Fprintf(output, "  --%-10s %s", flagValue.Name, flagValue.Usage)
+			_, _ = fmt.Fprintf(output, "  --%-10s %s", flagValue.Name, flagValue.Usage)
 			if flagValue.DefValue != "" {
-				fmt.Fprintf(output, " (default %s)", flagValue.DefValue)
+				_, _ = fmt.Fprintf(output, " (default %s)", flagValue.DefValue)
 			}
 			_, _ = fmt.Fprintln(output)
 		})
@@ -157,8 +160,8 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
-// getenvDefault 读取环境变量，当环境变量为空时返回传入的默认值。
-func getenvDefault(name string, fallback string) string {
+// getENVDefault 读取环境变量，当环境变量为空时返回传入的默认值。
+func getENVDefault(name string, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(name))
 	if value == "" {
 		return fallback

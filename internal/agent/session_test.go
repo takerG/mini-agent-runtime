@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -11,14 +12,14 @@ import (
 func TestSessionMessagesForModelInjectsMemoryWithoutMutatingHistory(t *testing.T) {
 	query := memory.Query{UserID: "u1", SessionID: "s1"}
 	manager := memory.NewManager(memory.NewWindowMemory(memory.WindowMemoryOptions{Scope: memory.ScopeSession, MaxTurns: 2}))
-	if err := manager.AppendTurn(t.Context(), query, memory.Turn{User: "remember city", Assistant: "Tokyo"}); err != nil {
+	if err := manager.AppendTurn(context.Background(), query, memory.Turn{User: "remember city", Assistant: "Tokyo"}); err != nil {
 		t.Fatalf("AppendTurn returned error: %v", err)
 	}
 
 	session := NewSession(SessionOptions{Memory: manager, MemoryQuery: query})
 	session.AppendUserMessage("what city?")
 
-	messages, err := session.MessagesForModel(t.Context())
+	messages, err := session.MessagesForModel(context.Background())
 	if err != nil {
 		t.Fatalf("MessagesForModel returned error: %v", err)
 	}
@@ -48,11 +49,11 @@ func TestSessionCommitTurnWritesMemory(t *testing.T) {
 	manager := memory.NewManager(memory.NewWindowMemory(memory.WindowMemoryOptions{Scope: memory.ScopeSession, MaxTurns: 2}))
 	session := NewSession(SessionOptions{Memory: manager, MemoryQuery: query})
 
-	if err := session.CommitTurn(t.Context(), "favorite color?", "blue"); err != nil {
+	if err := session.CommitTurn(context.Background(), "favorite color?", "blue"); err != nil {
 		t.Fatalf("CommitTurn returned error: %v", err)
 	}
 
-	messages, err := session.MessagesForModel(t.Context())
+	messages, err := session.MessagesForModel(context.Background())
 	if err != nil {
 		t.Fatalf("MessagesForModel returned error: %v", err)
 	}

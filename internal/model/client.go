@@ -94,7 +94,9 @@ func (c *Client) Chat(ctx context.Context, options ChatOptions) (ChatResult, err
 		return ChatResult{}, apperrors.Wrap(apperrors.NodeModelClient, apperrors.CodeModelRequestFailed, err, "post model request")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		resp.Body.Close()
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			return ChatResult{}, apperrors.Wrap(apperrors.NodeModelClient, apperrors.CodeResponseCloseFailed, closeErr, fmt.Sprintf("model request failed: %s; close response body", resp.Status))
+		}
 		return ChatResult{}, apperrors.New(apperrors.NodeModelClient, apperrors.CodeUpstreamStatusFailed, fmt.Sprintf("model request failed: %s", resp.Status))
 	}
 

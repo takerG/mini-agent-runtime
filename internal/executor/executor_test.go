@@ -65,9 +65,11 @@ func TestExecutorRunsPlanWithNativeToolCalls(t *testing.T) {
 			Think:    true,
 			HTTP:     client,
 		}),
-		Registry: tools.NewDefaultToolRegistry(time.Now),
-		Trace:    tracing.NewTraceHooks(nil),
-		Stdout:   &stdout,
+		Dependencies: Dependencies{
+			Registry: tools.NewDefaultToolRegistry(time.Now),
+			Trace:    tracing.NewTraceHooks(nil),
+			Stdout:   &stdout,
+		},
 	})
 
 	answer, err := executor.Execute(context.Background(), "23 * 19?", planner.Plan{
@@ -146,11 +148,13 @@ func TestExecutorCanPrintVisiblePlanObservationsAndFinalAnswer(t *testing.T) {
 			Think:    true,
 			HTTP:     client,
 		}),
-		Registry: tools.NewDefaultToolRegistry(func() time.Time {
-			return time.Date(2026, 5, 8, 20, 51, 42, 0, time.FixedZone("CST", 8*60*60))
-		}),
-		Trace:       tracing.NewTraceHooks(nil),
-		Stdout:      &stdout,
+		Dependencies: Dependencies{
+			Registry: tools.NewDefaultToolRegistry(func() time.Time {
+				return time.Date(2026, 5, 8, 20, 51, 42, 0, time.FixedZone("CST", 8*60*60))
+			}),
+			Trace:  tracing.NewTraceHooks(nil),
+			Stdout: &stdout,
+		},
 		ShowProcess: true,
 	})
 
@@ -234,11 +238,13 @@ func TestExecutorAggregatesVisibleProcessAcrossToolRounds(t *testing.T) {
 			Think:    true,
 			HTTP:     client,
 		}),
-		Registry: tools.NewDefaultToolRegistry(func() time.Time {
-			return time.Date(2026, 5, 8, 20, 51, 42, 0, time.FixedZone("CST", 8*60*60))
-		}),
-		Trace:       tracing.NewTraceHooks(nil),
-		Stdout:      &stdout,
+		Dependencies: Dependencies{
+			Registry: tools.NewDefaultToolRegistry(func() time.Time {
+				return time.Date(2026, 5, 8, 20, 51, 42, 0, time.FixedZone("CST", 8*60*60))
+			}),
+			Trace:  tracing.NewTraceHooks(nil),
+			Stdout: &stdout,
+		},
 		ShowProcess: true,
 	})
 

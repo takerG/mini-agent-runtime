@@ -162,7 +162,7 @@ func (r *Reporter) Log(err error) {
 	if r == nil || r.writer == nil || err == nil {
 		return
 	}
-	fmt.Fprintf(r.writer, "[error] %s\n", formatForOperator(err))
+	_, _ = fmt.Fprintf(r.writer, "[error] %s\n", formatForOperator(err))
 }
 
 // Debug 在 debug 模式开启时打印更适合排障的错误明细。
@@ -170,7 +170,7 @@ func (r *Reporter) Debug(err error) {
 	if r == nil || !r.debug || r.writer == nil || err == nil {
 		return
 	}
-	fmt.Fprintf(r.writer, "[debug] error: %s\n", formatForOperator(err))
+	_, _ = fmt.Fprintf(r.writer, "[debug] error: %s\n", formatForOperator(err))
 }
 
 // formatForOperator 将错误格式化成人类排障时更容易扫描的一行文本。

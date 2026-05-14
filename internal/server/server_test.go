@@ -60,3 +60,29 @@ func TestChatProxyHandlerStreamsModelContentToClient(t *testing.T) {
 		t.Fatalf("upstream body = %q, want user message", upstreamBody)
 	}
 }
+
+// TestChatProxyHandlerDoesNotAppendHTTPErrorAfterStreamingStarted 验证流式响应已经开始后，上游错误不会被 http.Error 拼进正常文本。
+func TestChatProxyHandlerDoesNotAppendHTTPErrorAfterStreamingStarted(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body: io.NopCloser(strings.NewReader(
+					`{"message":{"content":"hello"}}` + "\n" +
+						`{"message":` + "\n",
+				)),
+			}, nil
+		}),
+	}
+	handler := NewChatProxyHandler("http://localhost:11434/api/chat", "llama3.2", client)
+	req := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"message":"say hi"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if got, want := recorder.Body.String(), "hello"; got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+}

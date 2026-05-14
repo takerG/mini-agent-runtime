@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"time"
 
 	apperrors "mini-agent-runtime/internal/errors"
 	"mini-agent-runtime/internal/lifecycle"
@@ -16,14 +15,8 @@ import (
 
 // StrictExecutorOptions 描述 strict executor 执行可执行计划时需要的依赖。
 type StrictExecutorOptions struct {
-	Registry     *tools.ToolRegistry
-	ToolPolicy   tools.ExecutionPolicy
-	Trace        *tracing.TraceHooks
-	Reporter     *apperrors.Reporter
-	Stdout       io.Writer
+	Dependencies Dependencies
 	ShowProcess  bool
-	Recorder     *lifecycle.Recorder
-	ParentStepID string
 }
 
 // StrictObservation 表示 strict executor 执行单个工具调用后得到的观察结果。
@@ -46,35 +39,16 @@ type StrictExecutor struct {
 
 // NewStrictExecutor 创建 strict executor，并为未传入的依赖补齐默认实现。
 func NewStrictExecutor(options StrictExecutorOptions) *StrictExecutor {
-	registry := options.Registry
-	if registry == nil {
-		registry = tools.NewDefaultToolRegistry(time.Now)
-	}
-	toolPolicy := options.ToolPolicy
-	if toolPolicy.MaxAttempts == 0 {
-		toolPolicy = tools.DefaultExecutionPolicy()
-	}
-	traceHooks := options.Trace
-	if traceHooks == nil {
-		traceHooks = tracing.NewTraceHooks(nil)
-	}
-	reporter := options.Reporter
-	if reporter == nil {
-		reporter = apperrors.NewReporter(false, io.Discard)
-	}
-	stdout := options.Stdout
-	if stdout == nil {
-		stdout = io.Discard
-	}
+	dependencies := normalizeDependencies(options.Dependencies)
 	return &StrictExecutor{
-		registry:     registry,
-		toolPolicy:   toolPolicy,
-		trace:        traceHooks,
-		reporter:     reporter,
-		stdout:       stdout,
+		registry:     dependencies.Registry,
+		toolPolicy:   dependencies.ToolPolicy,
+		trace:        dependencies.Trace,
+		reporter:     dependencies.Reporter,
+		stdout:       dependencies.Stdout,
 		showProcess:  options.ShowProcess,
-		recorder:     options.Recorder,
-		parentStepID: options.ParentStepID,
+		recorder:     dependencies.Recorder,
+		parentStepID: dependencies.ParentStepID,
 	}
 }
 
@@ -84,12 +58,7 @@ func (e *StrictExecutor) Execute(ctx context.Context, plan planner.ExecutablePla
 	for _, step := range plan.Steps {
 		lifecycleStep, stepTrace := e.startStep(lifecycle.StepTypeToolCall, step.ToolName, step.Arguments)
 		stepTrace.ToolCall(tracing.ToolCallTrace{Name: step.ToolName, Arguments: step.Arguments})
-		result, err := e.registry.ExecuteWithPolicy(ctx, ollama.ToolCall{
-			Function: ollama.ToolFunctionCall{
-				Name:      step.ToolName,
-				Arguments: step.Arguments,
-			},
-		}, e.toolPolicy)
+		result, err := e.executeToolCall(ctx, step)
 		if err != nil {
 			err = apperrors.Wrap(apperrors.NodeAgentToolCall, apperrors.CodeToolExecutionFailed, err, "strict executor tool call failed")
 			stepTrace.ToolError(tracing.ToolErrorTrace{Name: step.ToolName, Error: err})
@@ -109,6 +78,19 @@ func (e *StrictExecutor) Execute(ctx context.Context, plan planner.ExecutablePla
 		e.printProcess(plan, observations)
 	}
 	return observations
+}
+
+// executeToolCall 执行 strict planner 中的单个工具步骤，并在 registry 缺失时返回配置错误。
+func (e *StrictExecutor) executeToolCall(ctx context.Context, step planner.ExecutableStep) (string, error) {
+	if e.registry == nil {
+		return "", missingRegistryError("strict executor")
+	}
+	return e.registry.ExecuteWithPolicy(ctx, ollama.ToolCall{
+		Function: ollama.ToolFunctionCall{
+			Name:      step.ToolName,
+			Arguments: step.Arguments,
+		},
+	}, e.toolPolicy)
 }
 
 // startStep 在 strict executor 内部创建可观测 step，并返回带 step 上下文的 trace hooks。
@@ -166,13 +148,13 @@ func (e *StrictExecutor) stepTraceContext(step lifecycle.Step) tracing.TraceCont
 func (e *StrictExecutor) printProcess(plan planner.ExecutablePlan, observations []StrictObservation) {
 	_, _ = fmt.Fprintln(e.stdout, "[plan]")
 	for i, step := range plan.Steps {
-		fmt.Fprintf(e.stdout, "%d. tool_call %s %s\n", i+1, step.ToolName, formatToolArguments(step.Arguments))
+		_, _ = fmt.Fprintf(e.stdout, "%d. tool_call %s %s\n", i+1, step.ToolName, formatToolArguments(step.Arguments))
 	}
 	_, _ = fmt.Fprintln(e.stdout)
 
 	_, _ = fmt.Fprintln(e.stdout, "[observation]")
 	for i, observation := range observations {
-		fmt.Fprintf(e.stdout, "%d. %s -> %s\n", i+1, observation.ToolName, observation.Result)
+		_, _ = fmt.Fprintf(e.stdout, "%d. %s -> %s\n", i+1, observation.ToolName, observation.Result)
 	}
 	_, _ = fmt.Fprintln(e.stdout)
 

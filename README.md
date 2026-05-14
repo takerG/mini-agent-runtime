@@ -124,6 +124,8 @@ Tool execution can be governed by `ExecutionPolicy`, including timeout, retry, a
 
 The CLI wiring also supports dependency injection through `ChatLoopDependencies`, so tests or future runtimes can provide a custom `ToolRegistry`, tool policy, memory manager, lifecycle factory, trace hooks, or error reporter without changing the CLI loop.
 
+Runtime and CLI are the composition roots for shared dependencies. `internal/executor` receives those dependencies through `executor.Dependencies` and does not create default tool registries, trace hooks, reporters, or tool policies by itself.
+
 ## Agent Memory
 
 The runtime includes a composable memory layer in `internal/memory`. Memory is controlled by code, not CLI flags, so different agent deployments can switch or combine memory strategies without changing the user-facing interface.
@@ -194,9 +196,35 @@ The entrypoint is intentionally thin:
 
 This layout keeps provider protocol, tool execution, tracing, runtime orchestration, and transport concerns separated, so later tools or model providers can be added without growing `main.go`.
 
+Default dependency assembly happens in `main.go`, `internal/agent`, and `Runtime`. Lower-level executors consume dependencies instead of creating their own runtime defaults, which keeps ownership clear and avoids hidden behavior differences between modes.
+
 ## Development
 
 Codex-facing project instructions start from `AGENTS.md`, which is the auto-discovered root instruction file. Detailed reusable guidance lives in `.codex/skills/mini-agent-runtime/SKILL.md` and its `references/` directory. `docs/specs/project-constraints.md` mirrors the canonical file layout for human maintainers.
+
+The project-level code quality spec lives in `CODING_SPEC.md`.
+
+Run the full local quality gate before committing code:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1
+```
+
+If `make` is available:
+
+```powershell
+make check
+```
+
+`scripts/check.ps1` runs gofmt check, CRLF check, `go vet ./...`, `go test ./...`, `staticcheck ./...`, and `golangci-lint run`. Install missing optional tools with:
+
+```powershell
+go install honnef.co/go/tools/cmd/staticcheck@latest
+```
+
+For `golangci-lint`, follow the official installation guide: https://golangci-lint.run/welcome/install/
+
+Minimum fallback checks:
 
 ```powershell
 $env:GOCACHE = Join-Path (Get-Location) ".gocache"
