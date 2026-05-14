@@ -46,6 +46,26 @@ type Runtime struct {
 	lifecycle   *lifecycle.Factory
 }
 
+// plannerRuntimeTurnExecutor 将 direct runtime API 适配到统一 turn coordinator。
+type plannerRuntimeTurnExecutor struct {
+	runtime *Runtime
+}
+
+// ExecuteTurn 执行 direct runtime API 下的 Hybrid Planner/Executor 核心逻辑。
+func (e plannerRuntimeTurnExecutor) ExecuteTurn(ctx context.Context, options turnExecutionOptions) (string, error) {
+	return e.runtime.runPlannerExecutorTurn(ctx, options.UserMessage, options.Recorder)
+}
+
+// strictPlannerRuntimeTurnExecutor 将 direct runtime API 适配到统一 turn coordinator。
+type strictPlannerRuntimeTurnExecutor struct {
+	runtime *Runtime
+}
+
+// ExecuteTurn 执行 direct runtime API 下的 Strict Planner/Executor 核心逻辑。
+func (e strictPlannerRuntimeTurnExecutor) ExecuteTurn(ctx context.Context, options turnExecutionOptions) (string, error) {
+	return e.runtime.runStrictPlannerExecutorTurn(ctx, options.UserMessage, options.Recorder)
+}
+
 // NewRuntime 创建 agent 运行时，并为未显式传入的依赖提供默认实现。
 func NewRuntime(options RuntimeOptions) *Runtime {
 	toolRegistry := options.Tools
@@ -100,9 +120,7 @@ func (r *Runtime) RunPlannerExecutorTurn(ctx context.Context, userMessage string
 		MemoryQuery: r.memoryQuery,
 		UserMessage: userMessage,
 		Stdout:      r.stdout,
-		Run: func(ctx context.Context, recorder *lifecycle.Recorder) (string, error) {
-			return r.runPlannerExecutorTurn(ctx, userMessage, recorder)
-		},
+		Executor:    plannerRuntimeTurnExecutor{runtime: r},
 	})
 	return result.AssistantMessage, err
 }
@@ -165,9 +183,7 @@ func (r *Runtime) RunStrictPlannerExecutorTurn(ctx context.Context, userMessage 
 		MemoryQuery: r.memoryQuery,
 		UserMessage: userMessage,
 		Stdout:      r.stdout,
-		Run: func(ctx context.Context, recorder *lifecycle.Recorder) (string, error) {
-			return r.runStrictPlannerExecutorTurn(ctx, userMessage, recorder)
-		},
+		Executor:    strictPlannerRuntimeTurnExecutor{runtime: r},
 	})
 	return result.AssistantMessage, err
 }

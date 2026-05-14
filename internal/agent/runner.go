@@ -55,19 +55,18 @@ type ChatRunner struct {
 
 // PlannerRunner 负责 Hybrid Planner/Executor 模式的单轮执行。
 type PlannerRunner struct {
-	*plannerModeRunner
+	planner *plannerModeRunner
 }
 
 // StrictPlannerRunner 负责 Strict Planner/Executor 模式的单轮执行。
 type StrictPlannerRunner struct {
-	*plannerModeRunner
+	planner *plannerModeRunner
 }
 
 // plannerModeRunner 封装 planner 类模式共享的会话、memory 和最终 trace 收尾逻辑。
 type plannerModeRunner struct {
 	runtime *Runtime
 	mode    Mode
-	run     func(*Runtime, context.Context, string, *lifecycle.Recorder) (string, error)
 }
 
 // NewModeRunner 根据 mode 创建对应 runner，让 CLI loop 不再关心具体模式分发细节。
@@ -86,23 +85,22 @@ func NewModeRunner(options RunnerOptions) (ModeRunner, error) {
 		}, nil
 	case ModePlan:
 		return &PlannerRunner{
-			plannerModeRunner: newPlannerModeRunner(deps, ModePlan, (*Runtime).runPlannerExecutorTurn),
+			planner: newPlannerModeRunner(deps, ModePlan),
 		}, nil
 	case ModeStrictPlan:
 		return &StrictPlannerRunner{
-			plannerModeRunner: newPlannerModeRunner(deps, ModeStrictPlan, (*Runtime).runStrictPlannerExecutorTurn),
+			planner: newPlannerModeRunner(deps, ModeStrictPlan),
 		}, nil
 	default:
 		return nil, apperrors.New(apperrors.NodeAgentLoop, apperrors.CodeInvalidUserInput, fmt.Sprintf("unknown agent mode: %s", deps.Mode))
 	}
 }
 
-// newPlannerModeRunner 创建 planner 类模式共享 runner，并注入实际 runtime 编排函数。
-func newPlannerModeRunner(options RunnerOptions, mode Mode, run func(*Runtime, context.Context, string, *lifecycle.Recorder) (string, error)) *plannerModeRunner {
+// newPlannerModeRunner 创建 planner 类模式共享 runner，并保留模式自身的 runtime 依赖。
+func newPlannerModeRunner(options RunnerOptions, mode Mode) *plannerModeRunner {
 	return &plannerModeRunner{
 		runtime: options.runtime(),
 		mode:    mode,
-		run:     run,
 	}
 }
 
@@ -116,10 +114,13 @@ func (r *ChatRunner) RunTurn(ctx context.Context, session *Session, userMessage 
 		UserMessage:          userMessage,
 		Stdout:               r.stdout,
 		PrintTrailingNewline: true,
-		Run: func(ctx context.Context, recorder *lifecycle.Recorder) (string, error) {
-			return r.runChatTurn(ctx, session, recorder)
-		},
+		Executor:             r,
 	})
+}
+
+// ExecuteTurn 执行普通 chat 模式的核心单轮逻辑，供统一 turn coordinator 调用。
+func (r *ChatRunner) ExecuteTurn(ctx context.Context, options turnExecutionOptions) (string, error) {
+	return r.runChatTurn(ctx, options.Session, options.Recorder)
 }
 
 // runChatTurn 执行普通 chat 模式内部模型和工具调用循环。
@@ -170,8 +171,28 @@ func (r *ChatRunner) runChatTurn(ctx context.Context, session *Session, recorder
 	}
 }
 
-// RunTurn 执行 planner 类模式的一轮用户输入，具体编排函数由构造 runner 时注入。
-func (r *plannerModeRunner) RunTurn(ctx context.Context, session *Session, userMessage string) (TurnResult, error) {
+// RunTurn 执行 Hybrid Planner/Executor 模式的一轮用户输入。
+func (r *PlannerRunner) RunTurn(ctx context.Context, session *Session, userMessage string) (TurnResult, error) {
+	return r.planner.runTurn(ctx, session, userMessage, r)
+}
+
+// ExecuteTurn 执行 Hybrid Planner/Executor 模式的核心单轮逻辑。
+func (r *PlannerRunner) ExecuteTurn(ctx context.Context, options turnExecutionOptions) (string, error) {
+	return r.planner.runtime.runPlannerExecutorTurn(ctx, options.UserMessage, options.Recorder)
+}
+
+// RunTurn 执行 Strict Planner/Executor 模式的一轮用户输入。
+func (r *StrictPlannerRunner) RunTurn(ctx context.Context, session *Session, userMessage string) (TurnResult, error) {
+	return r.planner.runTurn(ctx, session, userMessage, r)
+}
+
+// ExecuteTurn 执行 Strict Planner/Executor 模式的核心单轮逻辑。
+func (r *StrictPlannerRunner) ExecuteTurn(ctx context.Context, options turnExecutionOptions) (string, error) {
+	return r.planner.runtime.runStrictPlannerExecutorTurn(ctx, options.UserMessage, options.Recorder)
+}
+
+// runTurn 执行 planner 类模式共享的生命周期协调流程。
+func (r *plannerModeRunner) runTurn(ctx context.Context, session *Session, userMessage string, executor turnExecutor) (TurnResult, error) {
 	return runAgentTurn(ctx, turnCoordinatorOptions{
 		Mode:                 r.mode,
 		Trace:                r.runtime.trace,
@@ -180,9 +201,7 @@ func (r *plannerModeRunner) RunTurn(ctx context.Context, session *Session, userM
 		UserMessage:          userMessage,
 		Stdout:               r.runtime.stdout,
 		PrintTrailingNewline: true,
-		Run: func(ctx context.Context, recorder *lifecycle.Recorder) (string, error) {
-			return r.run(r.runtime, ctx, userMessage, recorder)
-		},
+		Executor:             executor,
 	})
 }
 

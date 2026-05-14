@@ -61,6 +61,24 @@ func (t *slowTool) Execute(ctx context.Context, args map[string]any) (string, er
 	return "", ctx.Err()
 }
 
+type substringRetryPolicy struct {
+	text string
+}
+
+// Retryable 判断错误文本是否包含指定片段。
+func (p substringRetryPolicy) Retryable(err error) bool {
+	return strings.Contains(err.Error(), p.text)
+}
+
+type denyAllPolicy struct {
+	err error
+}
+
+// Allow 始终返回预设错误，用于验证工具准入拒绝逻辑。
+func (p denyAllPolicy) Allow(ollama.ToolCall) error {
+	return p.err
+}
+
 // TestToolRegistryExecuteWithPolicyRetriesRetryableErrors 验证工具策略可以控制可重试错误的重试次数。
 func TestToolRegistryExecuteWithPolicyRetriesRetryableErrors(t *testing.T) {
 	registry := NewToolRegistry()
@@ -71,9 +89,7 @@ func TestToolRegistryExecuteWithPolicyRetriesRetryableErrors(t *testing.T) {
 		Function: ollama.ToolFunctionCall{Name: "retry_tool"},
 	}, ExecutionPolicy{
 		MaxAttempts: 2,
-		Retryable: func(err error) bool {
-			return strings.Contains(err.Error(), "temporary")
-		},
+		Retryable:   substringRetryPolicy{text: "temporary"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteWithPolicy returned error: %v", err)
@@ -110,9 +126,7 @@ func TestToolRegistryExecuteWithPolicyDeniesDisallowedTools(t *testing.T) {
 	_, err := registry.ExecuteWithPolicy(context.Background(), ollama.ToolCall{
 		Function: ollama.ToolFunctionCall{Name: "retry_tool"},
 	}, ExecutionPolicy{
-		Allow: func(call ollama.ToolCall) error {
-			return errors.New("approval required")
-		},
+		Allow: denyAllPolicy{err: errors.New("approval required")},
 	})
 	if err == nil {
 		t.Fatal("ExecuteWithPolicy returned nil error, want policy error")

@@ -115,11 +115,8 @@ func TestStreamChatMessageBeforeContentHookRunsOnceBeforeFirstWrite(t *testing.T
 	})
 
 	content, _, err := StreamChatMessageAndCaptureWithOptions(input, StreamOptions{
-		Writer: writer,
-		BeforeContent: func() error {
-			events = append(events, "before")
-			return nil
-		},
+		Writer:       writer,
+		ContentStart: &recordingContentStartHook{events: &events},
 	})
 	if err != nil {
 		t.Fatalf("StreamChatMessageAndCaptureWithOptions returned error: %v", err)
@@ -150,6 +147,16 @@ type writerFunc func([]byte) (int, error)
 // Write 让测试可以用函数模拟 io.Writer。
 func (fn writerFunc) Write(p []byte) (int, error) {
 	return fn(p)
+}
+
+type recordingContentStartHook struct {
+	events *[]string
+}
+
+// BeforeContent 记录测试 hook 在首个内容 chunk 写出前被调用。
+func (h *recordingContentStartHook) BeforeContent() error {
+	*h.events = append(*h.events, "before")
+	return nil
 }
 
 // TestNewChatRequestWithMessagesBuildsConversationHistoryPayload 验证多轮消息会进入请求负载。

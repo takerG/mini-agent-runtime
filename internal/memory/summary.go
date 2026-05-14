@@ -10,14 +10,6 @@ type Summarizer interface {
 	Summarize(ctx context.Context, existing string, turn Turn) (string, error)
 }
 
-// SummarizerFunc 允许普通函数作为摘要策略接入 SummaryMemory。
-type SummarizerFunc func(ctx context.Context, existing string, turn Turn) (string, error)
-
-// Summarize 调用函数形式的摘要策略。
-func (f SummarizerFunc) Summarize(ctx context.Context, existing string, turn Turn) (string, error) {
-	return f(ctx, existing, turn)
-}
-
 // LocalSummarizer 使用本地字符串策略生成摘要，适合作为离线 demo 和测试默认实现。
 type LocalSummarizer struct{}
 

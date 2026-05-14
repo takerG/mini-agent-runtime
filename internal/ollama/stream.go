@@ -33,9 +33,16 @@ func StreamChatMessageAndCapture(r io.Reader, w io.Writer) (string, []ToolCall, 
 	return StreamChatMessageAndCaptureWithOptions(r, StreamOptions{Writer: w})
 }
 
+// ContentStartHook 定义首个内容 chunk 写出前执行的扩展点。
+type ContentStartHook interface {
+	// BeforeContent 在首个内容 chunk 写出前执行。
+	BeforeContent() error
+}
+
+// StreamOptions 描述流式解析时的输出目标和内容开始 hook。
 type StreamOptions struct {
-	Writer        io.Writer
-	BeforeContent func() error
+	Writer       io.Writer
+	ContentStart ContentStartHook
 }
 
 // StreamChatMessageAndCaptureWithOptions 使用扩展选项解析 Ollama 流式响应。
@@ -73,8 +80,8 @@ func StreamChatMessageAndCaptureWithOptions(r io.Reader, options StreamOptions) 
 			toolCalls = append(toolCalls, response.Message.ToolCalls...)
 		}
 		if response.Message.Content != "" {
-			if !contentStarted && options.BeforeContent != nil {
-				if err := options.BeforeContent(); err != nil {
+			if !contentStarted && options.ContentStart != nil {
+				if err := options.ContentStart.BeforeContent(); err != nil {
 					return captured.String(), toolCalls, apperrors.Wrap(apperrors.NodeOllamaStream, apperrors.CodeStreamWriteFailed, err, "run before content hook")
 				}
 			}

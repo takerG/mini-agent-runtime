@@ -10,18 +10,24 @@ import (
 	"mini-agent-runtime/internal/ollama"
 )
 
-// AllowFunc 定义工具执行前的准入检查函数。
-type AllowFunc func(call ollama.ToolCall) error
+// AllowPolicy 定义工具执行前的准入检查策略。
+type AllowPolicy interface {
+	// Allow 判断本次工具调用是否允许执行。
+	Allow(call ollama.ToolCall) error
+}
 
-// RetryableFunc 定义工具执行失败后是否允许重试的判断函数。
-type RetryableFunc func(err error) bool
+// RetryPolicy 定义工具执行失败后的重试判断策略。
+type RetryPolicy interface {
+	// Retryable 判断本次工具错误是否允许再次尝试。
+	Retryable(err error) bool
+}
 
 // ExecutionPolicy 描述工具调用的运行时治理策略。
 type ExecutionPolicy struct {
 	Timeout     time.Duration
 	MaxAttempts int
-	Allow       AllowFunc
-	Retryable   RetryableFunc
+	Allow       AllowPolicy
+	Retryable   RetryPolicy
 }
 
 // DefaultExecutionPolicy 返回默认工具执行策略：单次执行、不超时、不自动重试。
@@ -36,7 +42,7 @@ func (r *ToolRegistry) ExecuteWithPolicy(ctx context.Context, call ollama.ToolCa
 		return "", apperrors.New(apperrors.NodeToolRegistry, apperrors.CodeToolNotFound, fmt.Sprintf("unknown tool: %s", call.Function.Name))
 	}
 	if policy.Allow != nil {
-		if err := policy.Allow(call); err != nil {
+		if err := policy.Allow.Allow(call); err != nil {
 			return "", apperrors.Wrap(apperrors.NodeToolRegistry, apperrors.CodeToolExecutionFailed, err, fmt.Sprintf("tool execution denied: %s", call.Function.Name))
 		}
 	}
@@ -49,7 +55,7 @@ func (r *ToolRegistry) ExecuteWithPolicy(ctx context.Context, call ollama.ToolCa
 			return result, nil
 		}
 		lastErr = err
-		if attempt >= policy.MaxAttempts || policy.Retryable == nil || !policy.Retryable(err) {
+		if attempt >= policy.MaxAttempts || policy.Retryable == nil || !policy.Retryable.Retryable(err) {
 			break
 		}
 	}
@@ -67,11 +73,11 @@ func normalizeExecutionPolicy(policy ExecutionPolicy) ExecutionPolicy {
 // executeToolAttempt 执行单次工具调用，并在配置超时时为本次调用附加 deadline。
 func executeToolAttempt(ctx context.Context, tool Tool, args map[string]any, timeout time.Duration) (string, error) {
 	attemptCtx := ctx
-	cancel := func() {}
 	if timeout > 0 {
+		var cancel context.CancelFunc
 		attemptCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
 	}
-	defer cancel()
 
 	result, err := tool.Execute(attemptCtx, args)
 	if timeout > 0 && errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {

@@ -11,8 +11,17 @@ import (
 	tracing "mini-agent-runtime/internal/trace"
 )
 
-// turnRunFunc 表示单轮 agent 在具体模式下的核心执行函数。
-type turnRunFunc func(ctx context.Context, recorder *lifecycle.Recorder) (string, error)
+// turnExecutor 定义单轮 agent 在具体模式下的核心执行接口。
+type turnExecutor interface {
+	ExecuteTurn(ctx context.Context, options turnExecutionOptions) (string, error)
+}
+
+// turnExecutionOptions 描述具体模式执行器需要读取的单轮上下文。
+type turnExecutionOptions struct {
+	Session     *Session
+	UserMessage string
+	Recorder    *lifecycle.Recorder
+}
 
 // turnCoordinatorOptions 描述统一单轮生命周期协调器需要的依赖。
 type turnCoordinatorOptions struct {
@@ -25,7 +34,7 @@ type turnCoordinatorOptions struct {
 	UserMessage          string
 	Stdout               io.Writer
 	PrintTrailingNewline bool
-	Run                  turnRunFunc
+	Executor             turnExecutor
 }
 
 // runAgentTurn 统一处理单轮开始、用户输入记录、模式执行、memory 写入、最终 trace 和 run 收尾。
@@ -45,7 +54,14 @@ func runAgentTurn(ctx context.Context, options turnCoordinatorOptions) (result T
 		HistoryMessages: historyMessages,
 	})
 
-	assistantMessage, err := options.Run(ctx, recorder)
+	if options.Executor == nil {
+		return TurnResult{}, apperrors.New(apperrors.NodeAgentLoop, apperrors.CodeUnknown, "missing turn executor")
+	}
+	assistantMessage, err := options.Executor.ExecuteTurn(ctx, turnExecutionOptions{
+		Session:     options.Session,
+		UserMessage: options.UserMessage,
+		Recorder:    recorder,
+	})
 	if err != nil {
 		return TurnResult{}, err
 	}

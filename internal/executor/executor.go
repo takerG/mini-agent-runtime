@@ -78,22 +78,17 @@ func (e *Executor) Execute(ctx context.Context, userMessage string, plan planner
 		messages = append(messages, ollama.Message{Role: "system", Content: e.memoryContext})
 	}
 	messages = append(messages, ollama.Message{Role: "user", Content: userMessage})
-	allToolCalls := []ollama.ToolCall{}
-	allObservations := []toolObservation{}
+	processOutput := newExecutorProcessOutput(e, e.showProcess)
 
 	for toolRound := 0; ; toolRound++ {
 		if toolRound >= maxToolRounds {
 			return "", apperrors.New(apperrors.NodeAgentLoop, apperrors.CodeConversationLimit, "too many executor tool calls")
 		}
 
-		processPrinted := false
+		processOutput.ResetPrintState()
 		streamOptions := ollama.StreamOptions{Writer: e.stdout}
 		if e.showProcess {
-			streamOptions.BeforeContent = func() error {
-				e.printProcessAndFinalHeader(allToolCalls, allObservations)
-				processPrinted = true
-				return nil
-			}
+			streamOptions.ContentStart = processOutput
 		}
 
 		step, stepTrace := e.startStep(lifecycle.StepTypeModelRequest, "executor.model", map[string]any{"tool_round": toolRound})
@@ -115,14 +110,12 @@ func (e *Executor) Execute(ctx context.Context, userMessage string, plan planner
 		toolCalls := result.ToolCalls
 
 		if len(toolCalls) == 0 {
-			if e.showProcess && !processPrinted {
-				e.printProcessAndFinalHeader(allToolCalls, allObservations)
-			}
+			processOutput.PrintFinalHeaderIfNeeded()
 			e.trace.ExecutorFinish(tracing.ExecutorFinishTrace{ContentChars: len([]rune(assistantMessage))})
 			return assistantMessage, nil
 		}
 
-		allToolCalls = append(allToolCalls, toolCalls...)
+		processOutput.AppendToolCalls(toolCalls)
 
 		messages = append(messages, ollama.Message{
 			Role:      "assistant",
@@ -140,8 +133,7 @@ func (e *Executor) Execute(ctx context.Context, userMessage string, plan planner
 			}
 			e.addObservation(toolTrace, toolStep, observationType, call.Function.Name, result, toolErr)
 			e.finishStep(toolTrace, toolStep, toolErr)
-			observation := toolObservation{Name: call.Function.Name, Result: result}
-			allObservations = append(allObservations, observation)
+			processOutput.AppendObservation(call.Function.Name, result)
 			messages = append(messages, ollama.Message{
 				Role:     "tool",
 				Content:  result,
@@ -154,6 +146,55 @@ func (e *Executor) Execute(ctx context.Context, userMessage string, plan planner
 type toolObservation struct {
 	Name   string
 	Result string
+}
+
+type executorProcessOutput struct {
+	executor     *Executor
+	enabled      bool
+	printed      bool
+	toolCalls    []ollama.ToolCall
+	observations []toolObservation
+}
+
+// newExecutorProcessOutput 创建 executor 过程展示状态，供流式输出开始前打印 plan 和 observation。
+func newExecutorProcessOutput(executor *Executor, enabled bool) *executorProcessOutput {
+	return &executorProcessOutput{
+		executor: executor,
+		enabled:  enabled,
+	}
+}
+
+// BeforeContent 在当前模型响应的首个内容 chunk 写出前输出 executor 过程信息。
+func (o *executorProcessOutput) BeforeContent() error {
+	if !o.enabled {
+		return nil
+	}
+	o.executor.printProcessAndFinalHeader(o.toolCalls, o.observations)
+	o.printed = true
+	return nil
+}
+
+// ResetPrintState 重置当前模型请求轮次的过程输出状态。
+func (o *executorProcessOutput) ResetPrintState() {
+	o.printed = false
+}
+
+// AppendToolCalls 记录 executor 已经发起的工具调用，用于过程展示。
+func (o *executorProcessOutput) AppendToolCalls(toolCalls []ollama.ToolCall) {
+	o.toolCalls = append(o.toolCalls, toolCalls...)
+}
+
+// AppendObservation 记录 executor 已经收到的工具观察结果，用于过程展示。
+func (o *executorProcessOutput) AppendObservation(name string, result string) {
+	o.observations = append(o.observations, toolObservation{Name: name, Result: result})
+}
+
+// PrintFinalHeaderIfNeeded 在模型没有输出内容 chunk 时兜底打印最终回答标题。
+func (o *executorProcessOutput) PrintFinalHeaderIfNeeded() {
+	if !o.enabled || o.printed {
+		return
+	}
+	_ = o.BeforeContent()
 }
 
 // printPlan 将 executor 实际发起的工具调用按 plan 区块输出到 CLI。

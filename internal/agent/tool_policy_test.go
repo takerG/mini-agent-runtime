@@ -48,6 +48,13 @@ func (t *flakyTool) Execute(ctx context.Context, args map[string]any) (string, e
 	return "tool-ok", nil
 }
 
+type temporaryToolRetryPolicy struct{}
+
+// Retryable 判断工具错误是否属于测试中的临时错误。
+func (temporaryToolRetryPolicy) Retryable(err error) bool {
+	return strings.Contains(err.Error(), "temporary")
+}
+
 // TestRunChatLoopUsesInjectedToolExecutionPolicy 验证 CLI 运行链路会把注入的工具执行策略传给工具注册表。
 func TestRunChatLoopUsesInjectedToolExecutionPolicy(t *testing.T) {
 	var requests []ollama.ChatRequest
@@ -96,9 +103,7 @@ func TestRunChatLoopUsesInjectedToolExecutionPolicy(t *testing.T) {
 			Tools: registry,
 			ToolPolicy: tools.ExecutionPolicy{
 				MaxAttempts: 2,
-				Retryable: func(err error) bool {
-					return strings.Contains(err.Error(), "temporary")
-				},
+				Retryable:   temporaryToolRetryPolicy{},
 			},
 		},
 	})

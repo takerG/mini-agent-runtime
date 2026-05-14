@@ -19,6 +19,16 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
 
+type joiningSummarizer struct{}
+
+// Summarize 用固定拼接策略生成测试摘要。
+func (joiningSummarizer) Summarize(_ context.Context, existing string, turn Turn) (string, error) {
+	if existing == "" {
+		return turn.User + " -> " + turn.Assistant, nil
+	}
+	return existing + " | " + turn.User + " -> " + turn.Assistant, nil
+}
+
 // TestWindowMemoryKeepsRecentTurns 验证窗口 memory 只保留最近 N 轮对话。
 func TestWindowMemoryKeepsRecentTurns(t *testing.T) {
 	store := NewWindowMemory(WindowMemoryOptions{Scope: ScopeSession, MaxTurns: 2})
@@ -54,13 +64,8 @@ func TestWindowMemoryKeepsRecentTurns(t *testing.T) {
 // TestSummaryMemoryUpdatesPerUser 验证摘要 memory 按 user scope 聚合摘要。
 func TestSummaryMemoryUpdatesPerUser(t *testing.T) {
 	store := NewSummaryMemory(SummaryMemoryOptions{
-		Scope: ScopeUser,
-		Summarizer: SummarizerFunc(func(_ context.Context, existing string, turn Turn) (string, error) {
-			if existing == "" {
-				return turn.User + " -> " + turn.Assistant, nil
-			}
-			return existing + " | " + turn.User + " -> " + turn.Assistant, nil
-		}),
+		Scope:      ScopeUser,
+		Summarizer: joiningSummarizer{},
 	})
 
 	if err := store.AppendTurn(context.Background(), Query{UserID: "u1", SessionID: "s1"}, Turn{User: "likes tea", Assistant: "noted"}); err != nil {
