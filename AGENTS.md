@@ -15,6 +15,7 @@
 - 入口层保持轻量：根目录只保留 `main.go` 一个 Go 入口文件，其他能力必须组件化放入 `internal/` 下的包。
 - 默认使用 CRLF 换行；不要提交 `.idea/`、`.gocache/`、可执行文件或其他本地生成物。
 - 所有 Go 函数和方法必须有中文 GoDoc 注释，且注释必须以函数名或方法名开头。
+- 避免为简单字段访问创建一次性局部别名；新变量必须有复用、默认值改写、命名复杂表达式或降低阅读成本等明确理由。
 - 错误判断必须使用 `errors.Is` / `errors.As` 处理可能被 wrap 的错误；禁止用 `err == targetErr` 判断错误链。
 - 新增 goroutine 必须有明确退出条件；超时治理优先通过 `context.Context` 传递 deadline。
 - CLI 参数使用双横线形式，例如 `--mode`、`--trace`、`--trace-jsonl`、`--debug`、`--model`、`--think`。

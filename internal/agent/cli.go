@@ -76,56 +76,44 @@ func RunChatLoopWithTrace(endpoint string, model string, think bool, client *htt
 
 // RunChatLoopWithOptions 根据完整配置启动 CLI，对用户输入、模型流式响应和 agent runner 进行编排。
 func RunChatLoopWithOptions(options ChatLoopOptions) error {
-	endpoint := options.Endpoint
-	model := options.Model
-	think := options.Think
-	client := options.Client
-	stdin := options.Stdin
-	stdout := options.Stdout
-	stderr := options.Stderr
-	mode := options.Mode
-	if mode == "" {
-		mode = ModeChat
+	if options.Mode == "" {
+		options.Mode = ModeChat
 	}
-
-	if client == nil {
-		client = http.DefaultClient
+	if options.Client == nil {
+		options.Client = http.DefaultClient
 	}
-	if stdin == nil {
-		stdin = strings.NewReader("")
+	if options.Stdin == nil {
+		options.Stdin = strings.NewReader("")
 	}
-	if stdout == nil {
-		stdout = io.Discard
+	if options.Stdout == nil {
+		options.Stdout = io.Discard
 	}
-	if stderr == nil {
-		stderr = io.Discard
+	if options.Stderr == nil {
+		options.Stderr = io.Discard
 	}
-	dependencies := normalizeChatLoopDependencies(options.Dependencies, options.Trace, options.Memory, options.Debug, stderr)
+	dependencies := normalizeChatLoopDependencies(options.Dependencies, options.Trace, options.Memory, options.Debug, options.Stderr)
 	traceHooks := dependencies.Trace
-	reporter := dependencies.Reporter
 	toolRegistry := dependencies.Tools
-	toolPolicy := dependencies.ToolPolicy
 	memoryManager := dependencies.Memory
-	lifecycleFactory := dependencies.Lifecycle
 	memoryQuery := defaultMemoryQuery(options.MemoryQuery)
 	modelClient := modelclient.NewClient(modelclient.Options{
-		Endpoint: endpoint,
-		Model:    model,
-		Think:    think,
-		HTTP:     client,
+		Endpoint: options.Endpoint,
+		Model:    options.Model,
+		Think:    options.Think,
+		HTTP:     options.Client,
 		Trace:    traceHooks,
 	})
 	runner, err := NewModeRunner(RunnerOptions{
-		Mode:        mode,
+		Mode:        options.Mode,
 		ModelClient: modelClient,
 		Tools:       toolRegistry,
-		ToolPolicy:  toolPolicy,
+		ToolPolicy:  dependencies.ToolPolicy,
 		Trace:       traceHooks,
-		Reporter:    reporter,
-		Stdout:      stdout,
+		Reporter:    dependencies.Reporter,
+		Stdout:      options.Stdout,
 		Memory:      memoryManager,
 		MemoryQuery: memoryQuery,
-		Lifecycle:   lifecycleFactory,
+		Lifecycle:   dependencies.Lifecycle,
 	})
 	if err != nil {
 		return err
@@ -133,19 +121,19 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 	session := NewSession(SessionOptions{Memory: memoryManager, MemoryQuery: memoryQuery})
 
 	traceHooks.ChatLoopStart(tracing.ChatLoopStartTrace{
-		Endpoint: endpoint,
-		Model:    model,
-		Think:    think,
+		Endpoint: options.Endpoint,
+		Model:    options.Model,
+		Think:    options.Think,
 		Tools:    len(toolRegistry.Definitions()),
 	})
 
 	ctx := context.Background()
-	scanner := bufio.NewScanner(stdin)
+	scanner := bufio.NewScanner(options.Stdin)
 	pending := strings.TrimSpace(strings.Join(options.InitialArgs, " "))
 
 	for {
 		if pending == "" {
-			_, _ = fmt.Fprint(stderr, "You: ")
+			_, _ = fmt.Fprint(options.Stderr, "You: ")
 			if !scanner.Scan() {
 				if err := scanner.Err(); err != nil {
 					return apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeInvalidUserInput, err, "read message")
