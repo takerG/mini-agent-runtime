@@ -107,6 +107,8 @@ Every user turn is now recorded as a `Run` with stable `run_id`, mode, input, st
 
 The lifecycle model is implemented in `internal/lifecycle` and is shared by `chat`, `plan`, and `strict-plan`. Trace events reuse the same run/step context, so stderr trace logs and JSONL trace files can be correlated step by step.
 
+Single-turn lifecycle coordination is centralized in `internal/agent/turn.go`. CLI runners and direct runtime APIs both use this path, so final answers are consistently traced and written back to memory across `chat`, `plan`, and `strict-plan`.
+
 ## Agent Tools
 
 The CLI sends two tool definitions to the model on every chat turn:
@@ -129,6 +131,8 @@ Runtime and CLI are the composition roots for shared dependencies. `internal/exe
 ## Agent Memory
 
 The runtime includes a composable memory layer in `internal/memory`. Memory is controlled by code, not CLI flags, so different agent deployments can switch or combine memory strategies without changing the user-facing interface.
+
+Memory read/write is part of the unified turn lifecycle. Planner modes read memory before planner/executor requests, and direct runtime calls also commit the final user/assistant turn back into memory when the turn succeeds.
 
 The first version includes:
 

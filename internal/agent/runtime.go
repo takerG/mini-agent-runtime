@@ -92,14 +92,19 @@ func NewRuntime(options RuntimeOptions) *Runtime {
 
 // RunPlannerExecutorTurn 执行 Hybrid Planner/Executor 流程，由模型规划后再通过原生 tool calling 完成执行。
 func (r *Runtime) RunPlannerExecutorTurn(ctx context.Context, userMessage string) (string, error) {
-	recorder := startLifecycleRun(r.trace, r.lifecycle, ModePlan, userMessage)
-	var answer string
-	var err error
-	defer func() {
-		finishLifecycleRun(r.trace, recorder, answer, err)
-	}()
-	answer, err = r.runPlannerExecutorTurn(ctx, userMessage, recorder)
-	return answer, err
+	result, err := runAgentTurn(ctx, turnCoordinatorOptions{
+		Mode:        ModePlan,
+		Trace:       r.trace,
+		Lifecycle:   r.lifecycle,
+		Memory:      r.memory,
+		MemoryQuery: r.memoryQuery,
+		UserMessage: userMessage,
+		Stdout:      r.stdout,
+		Run: func(ctx context.Context, recorder *lifecycle.Recorder) (string, error) {
+			return r.runPlannerExecutorTurn(ctx, userMessage, recorder)
+		},
+	})
+	return result.AssistantMessage, err
 }
 
 // runPlannerExecutorTurn 执行 Hybrid Planner/Executor 内部流程，并复用调用方传入的生命周期 recorder。
@@ -152,14 +157,19 @@ func (r *Runtime) runPlannerExecutorTurn(ctx context.Context, userMessage string
 
 // RunStrictPlannerExecutorTurn 执行 Strict Planner/Executor 流程，由 Go 解析计划并直接调用工具。
 func (r *Runtime) RunStrictPlannerExecutorTurn(ctx context.Context, userMessage string) (string, error) {
-	recorder := startLifecycleRun(r.trace, r.lifecycle, ModeStrictPlan, userMessage)
-	var answer string
-	var err error
-	defer func() {
-		finishLifecycleRun(r.trace, recorder, answer, err)
-	}()
-	answer, err = r.runStrictPlannerExecutorTurn(ctx, userMessage, recorder)
-	return answer, err
+	result, err := runAgentTurn(ctx, turnCoordinatorOptions{
+		Mode:        ModeStrictPlan,
+		Trace:       r.trace,
+		Lifecycle:   r.lifecycle,
+		Memory:      r.memory,
+		MemoryQuery: r.memoryQuery,
+		UserMessage: userMessage,
+		Stdout:      r.stdout,
+		Run: func(ctx context.Context, recorder *lifecycle.Recorder) (string, error) {
+			return r.runStrictPlannerExecutorTurn(ctx, userMessage, recorder)
+		},
+	})
+	return result.AssistantMessage, err
 }
 
 // runStrictPlannerExecutorTurn 执行 Strict Planner/Executor 内部流程，并复用调用方传入的生命周期 recorder。

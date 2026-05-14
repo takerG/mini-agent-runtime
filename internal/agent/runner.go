@@ -66,8 +66,6 @@ type StrictPlannerRunner struct {
 // plannerModeRunner 封装 planner 类模式共享的会话、memory 和最终 trace 收尾逻辑。
 type plannerModeRunner struct {
 	runtime *Runtime
-	trace   *tracing.TraceHooks
-	stdout  io.Writer
 	mode    Mode
 	run     func(*Runtime, context.Context, string, *lifecycle.Recorder) (string, error)
 }
@@ -103,31 +101,37 @@ func NewModeRunner(options RunnerOptions) (ModeRunner, error) {
 func newPlannerModeRunner(options RunnerOptions, mode Mode, run func(*Runtime, context.Context, string, *lifecycle.Recorder) (string, error)) *plannerModeRunner {
 	return &plannerModeRunner{
 		runtime: options.runtime(),
-		trace:   options.Trace,
-		stdout:  options.Stdout,
 		mode:    mode,
 		run:     run,
 	}
 }
 
 // RunTurn 执行普通 chat 模式的一轮用户输入，并在需要时循环处理模型工具调用。
-func (r *ChatRunner) RunTurn(ctx context.Context, session *Session, userMessage string) (result TurnResult, err error) {
-	recorder := startLifecycleRun(r.trace, r.lifecycle, ModeChat, userMessage)
-	defer func() {
-		finishLifecycleRun(r.trace, recorder, result.AssistantMessage, err)
-	}()
+func (r *ChatRunner) RunTurn(ctx context.Context, session *Session, userMessage string) (TurnResult, error) {
+	return runAgentTurn(ctx, turnCoordinatorOptions{
+		Mode:                 ModeChat,
+		Trace:                r.trace,
+		Lifecycle:            r.lifecycle,
+		Session:              session,
+		UserMessage:          userMessage,
+		Stdout:               r.stdout,
+		PrintTrailingNewline: true,
+		Run: func(ctx context.Context, recorder *lifecycle.Recorder) (string, error) {
+			return r.runChatTurn(ctx, session, recorder)
+		},
+	})
+}
 
-	session.AppendUserMessage(userMessage)
-	r.trace.WithContext(runTraceContext(recorder)).TurnInput(tracing.TurnInputTrace{Message: userMessage, HistoryMessages: len(session.History())})
-
+// runChatTurn 执行普通 chat 模式内部模型和工具调用循环。
+func (r *ChatRunner) runChatTurn(ctx context.Context, session *Session, recorder *lifecycle.Recorder) (string, error) {
 	for toolRound := 0; ; toolRound++ {
 		if toolRound >= maxChatToolRounds {
-			return TurnResult{}, apperrors.New(apperrors.NodeAgentLoop, apperrors.CodeConversationLimit, "too many tool calls in one turn")
+			return "", apperrors.New(apperrors.NodeAgentLoop, apperrors.CodeConversationLimit, "too many tool calls in one turn")
 		}
 
 		messages, err := session.MessagesForModel(ctx)
 		if err != nil {
-			return TurnResult{}, err
+			return "", err
 		}
 		step, stepTrace := startLifecycleStep(r.trace, recorder, "", lifecycle.StepTypeModelRequest, "chat.model", map[string]any{"tool_round": toolRound})
 		chatResult, err := r.modelClient.Chat(ctx, modelclient.ChatOptions{
@@ -140,21 +144,13 @@ func (r *ChatRunner) RunTurn(ctx context.Context, session *Session, userMessage 
 		})
 		if err != nil {
 			finishLifecycleStep(stepTrace, recorder, step, err)
-			return TurnResult{}, err
+			return "", err
 		}
 		addLifecycleObservation(stepTrace, recorder, step, lifecycle.ObservationTypeModelResponse, "chat.model", chatResult.Content, nil)
 		finishLifecycleStep(stepTrace, recorder, step, nil)
 
 		if len(chatResult.ToolCalls) == 0 {
-			_, _ = fmt.Fprintln(r.stdout)
-			if chatResult.Content != "" {
-				session.AppendAssistantMessage(chatResult.Content)
-			}
-			if err := session.CommitTurn(ctx, userMessage, chatResult.Content); err != nil {
-				return TurnResult{}, err
-			}
-			r.trace.WithContext(runTraceContext(recorder)).FinalAnswer(tracing.FinalAnswerTrace{ContentChars: len([]rune(chatResult.Content)), HistoryMessages: len(session.History())})
-			return TurnResult{AssistantMessage: chatResult.Content}, nil
+			return chatResult.Content, nil
 		}
 
 		session.AppendAssistantToolCallMessage(chatResult.Content, chatResult.ToolCalls)
@@ -175,28 +171,19 @@ func (r *ChatRunner) RunTurn(ctx context.Context, session *Session, userMessage 
 }
 
 // RunTurn 执行 planner 类模式的一轮用户输入，具体编排函数由构造 runner 时注入。
-func (r *plannerModeRunner) RunTurn(ctx context.Context, session *Session, userMessage string) (result TurnResult, err error) {
-	recorder := startLifecycleRun(r.trace, r.runtime.lifecycle, r.mode, userMessage)
-	defer func() {
-		finishLifecycleRun(r.trace, recorder, result.AssistantMessage, err)
-	}()
-
-	session.AppendUserMessage(userMessage)
-	r.trace.WithContext(runTraceContext(recorder)).TurnInput(tracing.TurnInputTrace{Message: userMessage, HistoryMessages: len(session.History())})
-
-	assistantMessage, err := r.run(r.runtime, ctx, userMessage, recorder)
-	if err != nil {
-		return TurnResult{}, err
-	}
-	_, _ = fmt.Fprintln(r.stdout)
-	if assistantMessage != "" {
-		session.AppendAssistantMessage(assistantMessage)
-	}
-	if err := session.CommitTurn(ctx, userMessage, assistantMessage); err != nil {
-		return TurnResult{}, err
-	}
-	r.trace.WithContext(runTraceContext(recorder)).FinalAnswer(tracing.FinalAnswerTrace{ContentChars: len([]rune(assistantMessage)), HistoryMessages: len(session.History())})
-	return TurnResult{AssistantMessage: assistantMessage}, nil
+func (r *plannerModeRunner) RunTurn(ctx context.Context, session *Session, userMessage string) (TurnResult, error) {
+	return runAgentTurn(ctx, turnCoordinatorOptions{
+		Mode:                 r.mode,
+		Trace:                r.runtime.trace,
+		Lifecycle:            r.runtime.lifecycle,
+		Session:              session,
+		UserMessage:          userMessage,
+		Stdout:               r.runtime.stdout,
+		PrintTrailingNewline: true,
+		Run: func(ctx context.Context, recorder *lifecycle.Recorder) (string, error) {
+			return r.run(r.runtime, ctx, userMessage, recorder)
+		},
+	})
 }
 
 // executeToolCallForModel 执行模型请求的工具调用，并把工具错误格式化成模型可理解的 observation。

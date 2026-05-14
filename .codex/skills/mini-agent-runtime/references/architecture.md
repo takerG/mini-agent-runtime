@@ -5,7 +5,7 @@
 ## Package Ownership
 
 - `main.go`：唯一入口，只做 CLI 参数解析、模式选择、trace sink 装配和启动。
-- `internal/agent`：多轮 CLI loop、session、mode runner、runtime 编排、memory 注入、lifecycle 装配和工具错误反馈。
+- `internal/agent`：多轮 CLI loop、session、mode runner、turn coordinator、runtime 编排、memory 注入、lifecycle 装配和工具错误反馈。
 - `internal/lifecycle`：run、step、observation、result 的生命周期模型与 recorder。
 - `internal/model`：模型调用抽象、Ollama client 适配、请求/响应 trace 捕获。
 - `internal/ollama`：Ollama 兼容协议类型、请求 payload、流式 NDJSON 解析。
@@ -27,6 +27,7 @@
 - 新增 lifecycle 节点：优先使用 `internal/lifecycle.Recorder` 记录 run/step/observation，再让 trace 复用同一组 run/step ID。
 - 新增 trace 输出：优先实现 `trace.TraceSink`，通过 `trace.NewMultiSink` 组合，不改业务流程。
 - 新增 memory 策略：在 `internal/memory` 新增 provider，通过 manager 组合，不增加用户启动参数。
+- 调整单轮执行流程：保持 `internal/agent/turn.go` 作为统一收口，确保 CLI runner 和 direct runtime API 都经过同一套 run lifecycle 与 memory 写入。
 - 新增 planner/executor 能力：优先放在 `internal/planner` 和 `internal/executor`，让 `internal/agent` 只做编排。
 - 新增 prompt：放入 `internal/prompts`，避免 prompt 文本散落在 runtime 逻辑里。
 - 新增错误类型：通过 `internal/errors` 扩展错误码和节点，保持模型友好错误格式稳定。

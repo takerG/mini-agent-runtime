@@ -68,6 +68,7 @@
 ## 8. Memory 系统
 
 - MUST 区分 user memory 和 session memory。
+- MUST 所有模式的单轮 memory 读写通过统一 turn lifecycle 协调，不允许 direct runtime API 绕开最终 memory 写入。
 - MUST memory 策略通过代码装配、切换或组合，不通过 CLI 参数暴露。
 - MUST 支持最近 N 轮窗口记忆、摘要 memory、DB session state 的本地内存模拟实现。
 - SHOULD DB 或向量存储类能力先实现访问函数和接口边界，首版不访问外部数据库。
@@ -103,6 +104,7 @@
 
 - MUST `main.go` 只负责参数解析、模式选择、trace sink 装配和依赖启动。
 - MUST `internal/agent` 负责 CLI loop、runtime 编排、历史消息和模式分发。
+- MUST `internal/agent` 通过统一 turn coordinator 收敛 run lifecycle、用户输入记录、最终回答、memory 写入和 final trace。
 - MUST `internal/lifecycle` 负责 run、step、observation、result 记录。
 - MUST `internal/model` 负责共享模型调用、HTTP 请求、trace 和响应捕获。
 - MUST `internal/ollama` 负责 Ollama 兼容协议类型、请求构造和流式解析。
