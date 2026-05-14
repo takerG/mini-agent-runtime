@@ -27,13 +27,14 @@ type Client struct {
 }
 
 type ChatOptions struct {
-	Phase     string
-	ToolRound int
-	Model     string
-	Think     *bool
-	Messages  []ollama.Message
-	Tools     []ollama.ToolDefinition
-	Stream    ollama.StreamOptions
+	Phase        string
+	ToolRound    int
+	Model        string
+	Think        *bool
+	Messages     []ollama.Message
+	Tools        []ollama.ToolDefinition
+	Stream       ollama.StreamOptions
+	TraceContext tracing.TraceContext
 }
 
 type ChatResult struct {
@@ -81,7 +82,8 @@ func (c *Client) Chat(ctx context.Context, options ChatOptions) (ChatResult, err
 	if err != nil {
 		return ChatResult{}, apperrors.Wrap(apperrors.NodeModelClient, apperrors.CodeRequestBuildFailed, err, "build model request")
 	}
-	c.trace.ModelRequest(tracing.ModelRequestTrace{
+	traceHooks := c.trace.WithContext(options.TraceContext)
+	traceHooks.ModelRequest(tracing.ModelRequestTrace{
 		Phase:     options.Phase,
 		ToolRound: options.ToolRound,
 		Request:   ollama.NewChatPayload(modelName, options.Messages, think, options.Tools),
@@ -104,7 +106,7 @@ func (c *Client) Chat(ctx context.Context, options ChatOptions) (ChatResult, err
 	if closeErr != nil {
 		return ChatResult{}, apperrors.Wrap(apperrors.NodeModelClient, apperrors.CodeResponseCloseFailed, closeErr, "close model response")
 	}
-	c.trace.ModelResponse(tracing.ModelResponseTrace{
+	traceHooks.ModelResponse(tracing.ModelResponseTrace{
 		Phase:     options.Phase,
 		ToolRound: options.ToolRound,
 		Content:   content,

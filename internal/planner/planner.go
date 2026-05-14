@@ -9,6 +9,7 @@ import (
 	modelclient "mini-agent-runtime/internal/model"
 	"mini-agent-runtime/internal/ollama"
 	"mini-agent-runtime/internal/prompts"
+	tracing "mini-agent-runtime/internal/trace"
 )
 
 // Plan 表示 Hybrid Planner 生成的自然语言执行计划。
@@ -28,6 +29,7 @@ type Planner struct {
 	modelClient   *modelclient.Client
 	memoryContext string
 	toolHints     []string
+	traceContext  tracing.TraceContext
 }
 
 // Options 描述创建 Planner 时需要注入的依赖和上下文。
@@ -35,6 +37,7 @@ type Options struct {
 	ModelClient   *modelclient.Client
 	MemoryContext string
 	ToolHints     []string
+	TraceContext  tracing.TraceContext
 }
 
 // NewPlanner 创建 planner 组件，用于把用户目标拆解成执行计划。
@@ -43,6 +46,7 @@ func NewPlanner(options Options) *Planner {
 		modelClient:   options.ModelClient,
 		memoryContext: options.MemoryContext,
 		toolHints:     append([]string(nil), options.ToolHints...),
+		traceContext:  options.TraceContext,
 	}
 }
 
@@ -61,10 +65,11 @@ func (p *Planner) PlanWithContext(ctx context.Context, userMessage string) (Plan
 	}
 	messages = append(messages, ollama.Message{Role: "user", Content: userMessage})
 	result, err := p.modelClient.Chat(ctx, modelclient.ChatOptions{
-		Phase:     "planner",
-		ToolRound: 0,
-		Messages:  messages,
-		Stream:    ollama.StreamOptions{Writer: io.Discard},
+		Phase:        "planner",
+		ToolRound:    0,
+		Messages:     messages,
+		Stream:       ollama.StreamOptions{Writer: io.Discard},
+		TraceContext: p.traceContext,
 	})
 	if err != nil {
 		return Plan{}, apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeModelRequestFailed, err, "stream planner response")

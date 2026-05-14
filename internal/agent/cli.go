@@ -10,6 +10,7 @@ import (
 	"time"
 
 	apperrors "mini-agent-runtime/internal/errors"
+	"mini-agent-runtime/internal/lifecycle"
 	"mini-agent-runtime/internal/memory"
 	modelclient "mini-agent-runtime/internal/model"
 	"mini-agent-runtime/internal/tools"
@@ -45,10 +46,12 @@ type ChatLoopOptions struct {
 
 // ChatLoopDependencies 保存 CLI loop 可注入的框架依赖，便于测试和后续替换工具、memory、trace 或错误输出实现。
 type ChatLoopDependencies struct {
-	Tools    *tools.ToolRegistry
-	Memory   *memory.Manager
-	Trace    *tracing.TraceHooks
-	Reporter *apperrors.Reporter
+	Tools      *tools.ToolRegistry
+	ToolPolicy tools.ExecutionPolicy
+	Memory     *memory.Manager
+	Lifecycle  *lifecycle.Factory
+	Trace      *tracing.TraceHooks
+	Reporter   *apperrors.Reporter
 }
 
 // RunChatLoop 使用默认 trace 配置启动命令行多轮对话流程。
@@ -102,7 +105,9 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 	traceHooks = dependencies.Trace
 	reporter := dependencies.Reporter
 	toolRegistry := dependencies.Tools
+	toolPolicy := dependencies.ToolPolicy
 	memoryManager := dependencies.Memory
+	lifecycleFactory := dependencies.Lifecycle
 	memoryQuery := defaultMemoryQuery(options.MemoryQuery)
 	modelClient := modelclient.NewClient(modelclient.Options{
 		Endpoint: endpoint,
@@ -115,11 +120,13 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 		Mode:        mode,
 		ModelClient: modelClient,
 		Tools:       toolRegistry,
+		ToolPolicy:  toolPolicy,
 		Trace:       traceHooks,
 		Reporter:    reporter,
 		Stdout:      stdout,
 		Memory:      memoryManager,
 		MemoryQuery: memoryQuery,
+		Lifecycle:   lifecycleFactory,
 	})
 	if err != nil {
 		return err
@@ -178,11 +185,17 @@ func normalizeChatLoopDependencies(dependencies ChatLoopDependencies, traceHooks
 	if dependencies.Tools == nil {
 		dependencies.Tools = tools.NewDefaultToolRegistry(time.Now)
 	}
+	if dependencies.ToolPolicy.MaxAttempts == 0 {
+		dependencies.ToolPolicy = tools.DefaultExecutionPolicy()
+	}
 	if dependencies.Memory == nil {
 		dependencies.Memory = memoryManager
 	}
 	if dependencies.Memory == nil {
 		dependencies.Memory = memory.NewDefaultManager()
+	}
+	if dependencies.Lifecycle == nil {
+		dependencies.Lifecycle = lifecycle.NewFactory(lifecycle.FactoryOptions{})
 	}
 	return dependencies
 }

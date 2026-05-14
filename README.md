@@ -48,6 +48,14 @@ Trace logs are written to stderr and include user turns, full model request payl
 
 Internally, trace uses structured hooks. The default CLI sink formats those events as stderr logs, and future sinks can reuse the same events for files, metrics, or UI panels.
 
+Write machine-readable JSONL trace events when you want to replay or inspect the whole run lifecycle:
+
+```powershell
+go run . --model qwen3:4b --trace-jsonl trace.jsonl "现在几点？"
+```
+
+Each JSONL event includes a timestamp, event name, optional `run_id`, optional `step_id`, optional `parent_step_id`, and structured `data`.
+
 Enable debug error output when you want structured error details on stderr:
 
 ```powershell
@@ -93,6 +101,12 @@ Mode comparison:
 
 The default mode is `chat`, which preserves the original direct native tool-calling behavior.
 
+## Agent Runtime Lifecycle
+
+Every user turn is now recorded as a `Run` with stable `run_id`, mode, input, status, timing, steps, observations, and final result. Model requests, planner calls, executor work, tool calls, observations, and summaries are represented as lifecycle steps.
+
+The lifecycle model is implemented in `internal/lifecycle` and is shared by `chat`, `plan`, and `strict-plan`. Trace events reuse the same run/step context, so stderr trace logs and JSONL trace files can be correlated step by step.
+
 ## Agent Tools
 
 The CLI sends two tool definitions to the model on every chat turn:
@@ -106,7 +120,9 @@ If a tool does not exist or returns an error, the CLI does not exit immediately.
 
 Tools are managed through `ToolRegistry` in `internal/tools`. To add a new tool, implement the `Tool` interface with `Name()`, `Description()`, `Definition()`, and `Execute(ctx, args)`, then register the tool instance in `NewDefaultToolRegistry`.
 
-The CLI wiring also supports dependency injection through `ChatLoopDependencies`, so tests or future runtimes can provide a custom `ToolRegistry`, memory manager, trace hooks, or error reporter without changing the CLI loop.
+Tool execution can be governed by `ExecutionPolicy`, including timeout, retry, and allow/deny checks. The default policy is still simple: one attempt, no timeout, no retry.
+
+The CLI wiring also supports dependency injection through `ChatLoopDependencies`, so tests or future runtimes can provide a custom `ToolRegistry`, tool policy, memory manager, lifecycle factory, trace hooks, or error reporter without changing the CLI loop.
 
 ## Agent Memory
 
@@ -165,13 +181,14 @@ The entrypoint is intentionally thin:
 - `main.go`: parses flags, chooses CLI or HTTP server mode, wires components together.
 - `internal/agent`: owns the multi-turn CLI loop, `Session` history/memory state, mode runners, runtime dependency wiring, and tool error feedback.
 - `internal/model`: owns shared model invocation, request/response trace events, HTTP status handling, and stream capture.
+- `internal/lifecycle`: owns run, step, observation, result records, and lifecycle recording helpers.
 - `internal/memory`: owns memory providers, user/session scope separation, memory composition, and local simulated session state.
 - `internal/prompts`: owns reusable planner, executor, strict planner, and responder prompt templates.
 - `internal/planner`: asks the model for a structured JSON plan before execution.
 - `internal/executor`: follows hybrid plans with native tool calls, directly executes strict executable plans, and streams the final answer.
 - `internal/ollama`: owns Ollama-compatible protocol types, request payload construction, and streaming NDJSON parsing.
-- `internal/tools`: owns `Tool`, `ToolRegistry`, built-in tools, and tool argument validation.
-- `internal/trace`: owns structured trace events, hooks, and the stderr logger sink.
+- `internal/tools`: owns `Tool`, `ToolRegistry`, execution policy, built-in tools, and tool argument validation.
+- `internal/trace`: owns structured trace events, hooks, run/step context, stderr sink, multi sink, and JSONL sink.
 - `internal/errors`: owns error codes, runtime nodes, model-friendly error formatting, operator logs, and debug output.
 - `internal/server`: owns the streaming HTTP proxy handler.
 
@@ -179,10 +196,10 @@ This layout keeps provider protocol, tool execution, tracing, runtime orchestrat
 
 ## Development
 
-Project constraints are captured in `docs/specs/project-constraints.md`. Read that spec before changing code structure, CLI behavior, tools, trace, errors, comments, or line endings.
+Codex-facing project instructions start from `AGENTS.md`, which is the auto-discovered root instruction file. Detailed reusable guidance lives in `.codex/skills/mini-agent-runtime/SKILL.md` and its `references/` directory. `docs/specs/project-constraints.md` mirrors the canonical file layout for human maintainers.
 
 ```powershell
-$env:GOCACHE = "D:\work\mini-agent-runtime\.gocache"
-go test ./...
+$env:GOCACHE = Join-Path (Get-Location) ".gocache"
+go test -count=1 ./...
 go build -buildvcs=false ./...
 ```

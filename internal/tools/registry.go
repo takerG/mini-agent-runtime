@@ -2,10 +2,8 @@ package tools
 
 import (
 	"context"
-	"fmt"
 	"time"
 
-	apperrors "mini-agent-runtime/internal/errors"
 	"mini-agent-runtime/internal/ollama"
 )
 
@@ -55,11 +53,7 @@ func (r *ToolRegistry) Definitions() []ollama.ToolDefinition {
 
 // Execute 根据模型工具调用名称查找工具并执行。
 func (r *ToolRegistry) Execute(ctx context.Context, call ollama.ToolCall) (string, error) {
-	tool, ok := r.tools[call.Function.Name]
-	if !ok {
-		return "", apperrors.New(apperrors.NodeToolRegistry, apperrors.CodeToolNotFound, fmt.Sprintf("unknown tool: %s", call.Function.Name))
-	}
-	return tool.Execute(ctx, call.Function.Arguments)
+	return r.ExecuteWithPolicy(ctx, call, DefaultExecutionPolicy())
 }
 
 // NewDefaultToolRegistry 注册当前版本内置的默认工具集合。

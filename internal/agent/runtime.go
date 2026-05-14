@@ -10,6 +10,7 @@ import (
 
 	apperrors "mini-agent-runtime/internal/errors"
 	"mini-agent-runtime/internal/executor"
+	"mini-agent-runtime/internal/lifecycle"
 	"mini-agent-runtime/internal/memory"
 	modelclient "mini-agent-runtime/internal/model"
 	"mini-agent-runtime/internal/ollama"
@@ -23,22 +24,26 @@ import (
 type RuntimeOptions struct {
 	ModelClient *modelclient.Client
 	Tools       *tools.ToolRegistry
+	ToolPolicy  tools.ExecutionPolicy
 	Trace       *tracing.TraceHooks
 	Reporter    *apperrors.Reporter
 	Stdout      io.Writer
 	Memory      *memory.Manager
 	MemoryQuery memory.Query
+	Lifecycle   *lifecycle.Factory
 }
 
 // Runtime 负责承载跨模式复用的 agent 编排能力，尤其是 planner/executor 相关流程。
 type Runtime struct {
 	modelClient *modelclient.Client
 	tools       *tools.ToolRegistry
+	toolPolicy  tools.ExecutionPolicy
 	trace       *tracing.TraceHooks
 	reporter    *apperrors.Reporter
 	stdout      io.Writer
 	memory      *memory.Manager
 	memoryQuery memory.Query
+	lifecycle   *lifecycle.Factory
 }
 
 // NewRuntime 创建 agent 运行时，并为未显式传入的依赖提供默认实现。
@@ -46,6 +51,10 @@ func NewRuntime(options RuntimeOptions) *Runtime {
 	toolRegistry := options.Tools
 	if toolRegistry == nil {
 		toolRegistry = tools.NewDefaultToolRegistry(time.Now)
+	}
+	toolPolicy := options.ToolPolicy
+	if toolPolicy.MaxAttempts == 0 {
+		toolPolicy = tools.DefaultExecutionPolicy()
 	}
 	traceHooks := options.Trace
 	if traceHooks == nil {
@@ -63,52 +72,101 @@ func NewRuntime(options RuntimeOptions) *Runtime {
 	if memoryManager == nil {
 		memoryManager = memory.NewDefaultManager()
 	}
+	lifecycleFactory := options.Lifecycle
+	if lifecycleFactory == nil {
+		lifecycleFactory = lifecycle.NewFactory(lifecycle.FactoryOptions{})
+	}
 	memoryQuery := defaultMemoryQuery(options.MemoryQuery)
 	return &Runtime{
 		modelClient: options.ModelClient,
 		tools:       toolRegistry,
+		toolPolicy:  toolPolicy,
 		trace:       traceHooks,
 		reporter:    reporter,
 		stdout:      stdout,
 		memory:      memoryManager,
 		memoryQuery: memoryQuery,
+		lifecycle:   lifecycleFactory,
 	}
 }
 
 // RunPlannerExecutorTurn 执行 Hybrid Planner/Executor 流程，由模型规划后再通过原生 tool calling 完成执行。
 func (r *Runtime) RunPlannerExecutorTurn(ctx context.Context, userMessage string) (string, error) {
-	r.trace.PlannerRequest(tracing.PlannerRequestTrace{Message: userMessage, MessageChars: len([]rune(userMessage))})
+	recorder := startLifecycleRun(r.trace, r.lifecycle, ModePlan, userMessage)
+	var answer string
+	var err error
+	defer func() {
+		finishLifecycleRun(r.trace, recorder, answer, err)
+	}()
+	answer, err = r.runPlannerExecutorTurn(ctx, userMessage, recorder)
+	return answer, err
+}
+
+// runPlannerExecutorTurn 执行 Hybrid Planner/Executor 内部流程，并复用调用方传入的生命周期 recorder。
+func (r *Runtime) runPlannerExecutorTurn(ctx context.Context, userMessage string, recorder *lifecycle.Recorder) (string, error) {
+	plannerStep, plannerTrace := startLifecycleStep(r.trace, recorder, "", lifecycle.StepTypePlanner, "hybrid.planner", nil)
+	plannerTrace.PlannerRequest(tracing.PlannerRequestTrace{Message: userMessage, MessageChars: len([]rune(userMessage))})
 	memoryContext, err := r.memorySystemMessage(ctx)
 	if err != nil {
+		finishLifecycleStep(plannerTrace, recorder, plannerStep, err)
 		return "", err
 	}
 	plan, err := planner.NewPlanner(planner.Options{
 		ModelClient:   r.modelClient,
 		MemoryContext: memoryContext,
 		ToolHints:     toolNamesFromDefinitions(r.tools.Definitions()),
+		TraceContext:  stepTraceContext(recorder, plannerStep),
 	}).PlanWithContext(ctx, userMessage)
 	if err != nil {
+		finishLifecycleStep(plannerTrace, recorder, plannerStep, err)
 		return "", err
 	}
-	r.trace.PlannerResponse(tracing.PlannerResponseTrace{Goal: plan.Goal, Steps: len(plan.Steps)})
+	addLifecycleObservation(plannerTrace, recorder, plannerStep, lifecycle.ObservationTypeModelResponse, "hybrid.planner", plan.Goal, nil)
+	plannerTrace.PlannerResponse(tracing.PlannerResponseTrace{Goal: plan.Goal, Steps: len(plan.Steps)})
+	finishLifecycleStep(plannerTrace, recorder, plannerStep, nil)
 
+	executorStep, executorTrace := startLifecycleStep(r.trace, recorder, "", lifecycle.StepTypeExecutor, "hybrid.executor", map[string]any{"steps": len(plan.Steps)})
 	runtimeExecutor := executor.NewExecutor(executor.Options{
 		ModelClient:   r.modelClient,
 		Registry:      r.tools,
+		ToolPolicy:    r.toolPolicy,
 		Trace:         r.trace,
 		Reporter:      r.reporter,
 		Stdout:        r.stdout,
 		ShowProcess:   true,
 		MemoryContext: memoryContext,
+		Recorder:      recorder,
+		ParentStepID:  executorStep.ID,
 	})
-	return runtimeExecutor.Execute(ctx, userMessage, plan)
+	answer, err := runtimeExecutor.Execute(ctx, userMessage, plan)
+	if err != nil {
+		finishLifecycleStep(executorTrace, recorder, executorStep, err)
+		return "", err
+	}
+	addLifecycleObservation(executorTrace, recorder, executorStep, lifecycle.ObservationTypeFinalAnswer, "hybrid.executor", answer, nil)
+	finishLifecycleStep(executorTrace, recorder, executorStep, nil)
+	return answer, nil
 }
 
 // RunStrictPlannerExecutorTurn 执行 Strict Planner/Executor 流程，由 Go 解析计划并直接调用工具。
 func (r *Runtime) RunStrictPlannerExecutorTurn(ctx context.Context, userMessage string) (string, error) {
-	r.trace.PlannerRequest(tracing.PlannerRequestTrace{Message: userMessage, MessageChars: len([]rune(userMessage))})
+	recorder := startLifecycleRun(r.trace, r.lifecycle, ModeStrictPlan, userMessage)
+	var answer string
+	var err error
+	defer func() {
+		finishLifecycleRun(r.trace, recorder, answer, err)
+	}()
+	answer, err = r.runStrictPlannerExecutorTurn(ctx, userMessage, recorder)
+	return answer, err
+}
+
+// runStrictPlannerExecutorTurn 执行 Strict Planner/Executor 内部流程，并复用调用方传入的生命周期 recorder。
+func (r *Runtime) runStrictPlannerExecutorTurn(ctx context.Context, userMessage string, recorder *lifecycle.Recorder) (string, error) {
+	plannerStep, plannerTrace := startLifecycleStep(r.trace, recorder, "", lifecycle.StepTypePlanner, "strict.planner", nil)
+	plannerTrace.PlannerRequest(tracing.PlannerRequestTrace{Message: userMessage, MessageChars: len([]rune(userMessage))})
 	memoryContext, err := r.memorySystemMessage(ctx)
 	if err != nil {
+		finishLifecycleStep(plannerTrace, recorder, plannerStep, err)
 		return "", err
 	}
 	toolDefinitions := r.tools.Definitions()
@@ -120,27 +178,40 @@ func (r *Runtime) RunStrictPlannerExecutorTurn(ctx context.Context, userMessage 
 	}
 	plannerMessages = append(plannerMessages, ollama.Message{Role: "user", Content: userMessage})
 	planResult, err := r.modelClient.Chat(ctx, modelclient.ChatOptions{
-		Phase:    "strict_planner",
-		Messages: plannerMessages,
-		Tools:    toolDefinitions,
-		Stream:   ollama.StreamOptions{Writer: io.Discard},
+		Phase:        "strict_planner",
+		Messages:     plannerMessages,
+		Tools:        toolDefinitions,
+		Stream:       ollama.StreamOptions{Writer: io.Discard},
+		TraceContext: stepTraceContext(recorder, plannerStep),
 	})
 	if err != nil {
+		finishLifecycleStep(plannerTrace, recorder, plannerStep, err)
 		return "", err
 	}
 	plan, err := planner.ParseExecutablePlan(planResult.Content)
 	if err != nil {
+		finishLifecycleStep(plannerTrace, recorder, plannerStep, err)
 		return "", err
 	}
-	r.trace.PlannerResponse(tracing.PlannerResponseTrace{Goal: plan.Goal, Steps: len(plan.Steps)})
+	addLifecycleObservation(plannerTrace, recorder, plannerStep, lifecycle.ObservationTypeModelResponse, "strict.planner", plan.Goal, nil)
+	plannerTrace.PlannerResponse(tracing.PlannerResponseTrace{Goal: plan.Goal, Steps: len(plan.Steps)})
+	finishLifecycleStep(plannerTrace, recorder, plannerStep, nil)
 
+	executorStep, executorTrace := startLifecycleStep(r.trace, recorder, "", lifecycle.StepTypeExecutor, "strict.executor", map[string]any{"steps": len(plan.Steps)})
 	observations := executor.NewStrictExecutor(executor.StrictExecutorOptions{
-		Registry:    r.tools,
-		Trace:       r.trace,
-		Reporter:    r.reporter,
-		Stdout:      r.stdout,
-		ShowProcess: true,
+		Registry:     r.tools,
+		ToolPolicy:   r.toolPolicy,
+		Trace:        r.trace,
+		Reporter:     r.reporter,
+		Stdout:       r.stdout,
+		ShowProcess:  true,
+		Recorder:     recorder,
+		ParentStepID: executorStep.ID,
 	}).Execute(ctx, plan)
+	addLifecycleObservation(executorTrace, recorder, executorStep, lifecycle.ObservationTypeToolResult, "strict.executor", fmt.Sprintf("%d observations", len(observations)), nil)
+	finishLifecycleStep(executorTrace, recorder, executorStep, nil)
+
+	summaryStep, summaryTrace := startLifecycleStep(r.trace, recorder, "", lifecycle.StepTypeSummary, "strict.summary", nil)
 	summaryMessages := []ollama.Message{
 		{Role: "system", Content: prompts.StrictSummarySystemPrompt(strictRuntimeContextJSON(plan, observations))},
 	}
@@ -149,13 +220,17 @@ func (r *Runtime) RunStrictPlannerExecutorTurn(ctx context.Context, userMessage 
 	}
 	summaryMessages = append(summaryMessages, ollama.Message{Role: "user", Content: userMessage})
 	summary, err := r.modelClient.Chat(ctx, modelclient.ChatOptions{
-		Phase:    "strict_summary",
-		Messages: summaryMessages,
-		Stream:   ollama.StreamOptions{Writer: r.stdout},
+		Phase:        "strict_summary",
+		Messages:     summaryMessages,
+		Stream:       ollama.StreamOptions{Writer: r.stdout},
+		TraceContext: stepTraceContext(recorder, summaryStep),
 	})
 	if err != nil {
+		finishLifecycleStep(summaryTrace, recorder, summaryStep, err)
 		return "", err
 	}
+	addLifecycleObservation(summaryTrace, recorder, summaryStep, lifecycle.ObservationTypeFinalAnswer, "strict.summary", summary.Content, nil)
+	finishLifecycleStep(summaryTrace, recorder, summaryStep, nil)
 	return summary.Content, nil
 }
 

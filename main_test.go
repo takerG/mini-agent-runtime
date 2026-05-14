@@ -38,6 +38,25 @@ func TestParseCLIOptionsAcceptsDoubleDashFlags(t *testing.T) {
 	}
 }
 
+// TestParseCLIOptionsAcceptsTraceJSONLFlag 验证 CLI 可以解析 JSONL trace 文件输出参数。
+func TestParseCLIOptionsAcceptsTraceJSONLFlag(t *testing.T) {
+	var output strings.Builder
+
+	options, err := parseCLIOptions([]string{
+		"--trace-jsonl", "trace.jsonl",
+		"hello",
+	}, &output)
+	if err != nil {
+		t.Fatalf("parseCLIOptions returned error: %v", err)
+	}
+	if got, want := options.traceJSONL, "trace.jsonl"; got != want {
+		t.Fatalf("traceJSONL = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(options.initialArgs, " "), "hello"; got != want {
+		t.Fatalf("initial args = %q, want %q", got, want)
+	}
+}
+
 // TestCLIUsageShowsDoubleDashFlags 验证帮助信息使用双横线展示参数名称。
 func TestCLIUsageShowsDoubleDashFlags(t *testing.T) {
 	var output strings.Builder
@@ -48,7 +67,7 @@ func TestCLIUsageShowsDoubleDashFlags(t *testing.T) {
 	}
 
 	got := output.String()
-	for _, want := range []string{"--mode", "--trace", "--model", "--think"} {
+	for _, want := range []string{"--mode", "--trace", "--trace-jsonl", "--model", "--think"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("usage = %q, want to contain %s", got, want)
 		}

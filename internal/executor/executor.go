@@ -7,6 +7,7 @@ import (
 	"io"
 
 	apperrors "mini-agent-runtime/internal/errors"
+	"mini-agent-runtime/internal/lifecycle"
 	modelclient "mini-agent-runtime/internal/model"
 	"mini-agent-runtime/internal/ollama"
 	"mini-agent-runtime/internal/planner"
@@ -20,21 +21,27 @@ const maxToolRounds = 4
 type Options struct {
 	ModelClient   *modelclient.Client
 	Registry      *tools.ToolRegistry
+	ToolPolicy    tools.ExecutionPolicy
 	Trace         *tracing.TraceHooks
 	Reporter      *apperrors.Reporter
 	Stdout        io.Writer
 	ShowProcess   bool
 	MemoryContext string
+	Recorder      *lifecycle.Recorder
+	ParentStepID  string
 }
 
 type Executor struct {
 	modelClient   *modelclient.Client
 	registry      *tools.ToolRegistry
+	toolPolicy    tools.ExecutionPolicy
 	trace         *tracing.TraceHooks
 	reporter      *apperrors.Reporter
 	stdout        io.Writer
 	showProcess   bool
 	memoryContext string
+	recorder      *lifecycle.Recorder
+	parentStepID  string
 }
 
 // NewExecutor 创建执行器，并补齐输出、trace 和 reporter 的默认依赖。
@@ -51,15 +58,22 @@ func NewExecutor(options Options) *Executor {
 	if reporter == nil {
 		reporter = apperrors.NewReporter(false, io.Discard)
 	}
+	toolPolicy := options.ToolPolicy
+	if toolPolicy.MaxAttempts == 0 {
+		toolPolicy = tools.DefaultExecutionPolicy()
+	}
 
 	return &Executor{
 		modelClient:   options.ModelClient,
 		registry:      options.Registry,
+		toolPolicy:    toolPolicy,
 		trace:         traceHooks,
 		reporter:      reporter,
 		stdout:        stdout,
 		showProcess:   options.ShowProcess,
 		memoryContext: options.MemoryContext,
+		recorder:      options.Recorder,
+		parentStepID:  options.ParentStepID,
 	}
 }
 
@@ -103,16 +117,21 @@ func (e *Executor) Execute(ctx context.Context, userMessage string, plan planner
 			}
 		}
 
+		step, stepTrace := e.startStep(lifecycle.StepTypeModelRequest, "executor.model", map[string]any{"tool_round": toolRound})
 		result, err := e.modelClient.Chat(ctx, modelclient.ChatOptions{
-			Phase:     "executor",
-			ToolRound: toolRound,
-			Messages:  messages,
-			Tools:     e.registry.Definitions(),
-			Stream:    streamOptions,
+			Phase:        "executor",
+			ToolRound:    toolRound,
+			Messages:     messages,
+			Tools:        e.registry.Definitions(),
+			Stream:       streamOptions,
+			TraceContext: e.stepTraceContext(step),
 		})
 		if err != nil {
+			e.finishStep(stepTrace, step, err)
 			return "", err
 		}
+		e.addObservation(stepTrace, step, lifecycle.ObservationTypeModelResponse, "executor.model", result.Content, nil)
+		e.finishStep(stepTrace, step, nil)
 		assistantMessage := result.Content
 		toolCalls := result.ToolCalls
 
@@ -132,9 +151,16 @@ func (e *Executor) Execute(ctx context.Context, userMessage string, plan planner
 			ToolCalls: toolCalls,
 		})
 		for _, call := range toolCalls {
-			e.trace.ToolCall(tracing.ToolCallTrace{Name: call.Function.Name, Arguments: call.Function.Arguments})
-			result := e.executeToolCall(ctx, call)
-			e.trace.ToolResult(tracing.ToolResultTrace{Name: call.Function.Name, Result: result})
+			toolStep, toolTrace := e.startStep(lifecycle.StepTypeToolCall, call.Function.Name, call.Function.Arguments)
+			toolTrace.ToolCall(tracing.ToolCallTrace{Name: call.Function.Name, Arguments: call.Function.Arguments})
+			result, toolErr := e.executeToolCall(ctx, call, toolTrace)
+			toolTrace.ToolResult(tracing.ToolResultTrace{Name: call.Function.Name, Result: result})
+			observationType := lifecycle.ObservationTypeToolResult
+			if toolErr != nil {
+				observationType = lifecycle.ObservationTypeToolError
+			}
+			e.addObservation(toolTrace, toolStep, observationType, call.Function.Name, result, toolErr)
+			e.finishStep(toolTrace, toolStep, toolErr)
 			observation := toolObservation{Name: call.Function.Name, Result: result}
 			allObservations = append(allObservations, observation)
 			messages = append(messages, ollama.Message{
@@ -191,15 +217,84 @@ func formatToolArguments(args map[string]any) string {
 }
 
 // executeToolCall 执行单次工具调用，并把失败结果转换成模型可继续处理的文本。
-func (e *Executor) executeToolCall(ctx context.Context, call ollama.ToolCall) string {
-	result, err := e.registry.Execute(ctx, call)
+func (e *Executor) executeToolCall(ctx context.Context, call ollama.ToolCall, traceHooks *tracing.TraceHooks) (string, error) {
+	result, err := e.registry.ExecuteWithPolicy(ctx, call, e.toolPolicy)
 	if err != nil {
 		err = apperrors.Wrap(apperrors.NodeAgentToolCall, apperrors.CodeToolExecutionFailed, err, "executor tool call failed")
-		e.trace.ToolError(tracing.ToolErrorTrace{Name: call.Function.Name, Error: err})
+		traceHooks.ToolError(tracing.ToolErrorTrace{Name: call.Function.Name, Error: err})
 		e.reporter.Debug(err)
-		return apperrors.FormatForModel(err)
+		return apperrors.FormatForModel(err), err
 	}
-	return result
+	return result, nil
+}
+
+// startStep 在 executor 内部创建可观测 step，并返回带 step 上下文的 trace hooks。
+func (e *Executor) startStep(stepType lifecycle.StepType, name string, metadata map[string]any) (lifecycle.Step, *tracing.TraceHooks) {
+	if e.recorder == nil {
+		return lifecycle.Step{}, e.trace
+	}
+	step := e.recorder.StartStep(e.parentStepID, stepType, name, metadata)
+	stepTrace := e.trace.WithContext(e.stepTraceContext(step))
+	stepTrace.StepStart(tracing.StepStartTrace{Type: string(step.Type), Name: step.Name})
+	return step, stepTrace
+}
+
+// finishStep 结束 executor 内部 step，并输出 step_finish trace。
+func (e *Executor) finishStep(traceHooks *tracing.TraceHooks, step lifecycle.Step, err error) {
+	if e.recorder == nil || step.ID == "" {
+		return
+	}
+	e.recorder.FinishStep(step.ID, err)
+	latest := executorLifecycleStepByID(e.recorder.Run(), step.ID)
+	traceHooks.StepFinish(tracing.StepFinishTrace{
+		Status:     string(latest.Status),
+		Error:      executorErrorString(err),
+		DurationMs: latest.Duration.Milliseconds(),
+	})
+}
+
+// addObservation 记录 executor 内部 step 观察结果，并输出 observation trace。
+func (e *Executor) addObservation(traceHooks *tracing.TraceHooks, step lifecycle.Step, observationType lifecycle.ObservationType, name string, content string, err error) {
+	if e.recorder == nil || step.ID == "" {
+		return
+	}
+	e.recorder.AddObservation(step.ID, observationType, name, content, err)
+	traceHooks.Observation(tracing.ObservationTrace{
+		Type:    string(observationType),
+		Name:    name,
+		Content: content,
+		Error:   executorErrorString(err),
+	})
+}
+
+// stepTraceContext 根据 executor 当前 run 和 step 构造 trace 上下文。
+func (e *Executor) stepTraceContext(step lifecycle.Step) tracing.TraceContext {
+	if e.recorder == nil {
+		return tracing.TraceContext{}
+	}
+	return tracing.TraceContext{
+		RunID:        e.recorder.RunID(),
+		StepID:       step.ID,
+		ParentStepID: step.ParentID,
+	}
+}
+
+// executorLifecycleStepByID 从 run 快照中查找指定 step。
+func executorLifecycleStepByID(run lifecycle.Run, stepID string) lifecycle.Step {
+	for _, step := range run.Steps {
+		if step.ID == stepID {
+			return step
+		}
+	}
+	return lifecycle.Step{}
+}
+
+// executorErrorString 把可选错误转换成稳定字符串。
+func executorErrorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // executorSystemPrompt 根据 planner 输出构造 executor 阶段的系统提示词。

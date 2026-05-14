@@ -21,6 +21,7 @@ type cliOptions struct {
 	model       string
 	think       bool
 	trace       bool
+	traceJSONL  string
 	debug       bool
 	mode        agent.Mode
 	serveAddr   string
@@ -50,6 +51,12 @@ func main() {
 		return
 	}
 
+	traceHooks, traceCloser, err := buildTraceHooks(options, os.Stderr)
+	if err != nil {
+		exitWithError(err, options.debug)
+	}
+	defer traceCloser.Close()
+
 	err = agent.RunChatLoopWithOptions(agent.ChatLoopOptions{
 		Endpoint:    options.endpoint,
 		Model:       options.model,
@@ -59,7 +66,7 @@ func main() {
 		Stdin:       os.Stdin,
 		Stdout:      os.Stdout,
 		Stderr:      os.Stderr,
-		Trace:       tracing.NewTraceHooks(tracing.NewTraceLogger(options.trace, os.Stderr)),
+		Trace:       traceHooks,
 		Debug:       options.debug,
 		Mode:        options.mode,
 	})
@@ -75,6 +82,7 @@ func parseCLIOptions(args []string, output io.Writer) (cliOptions, error) {
 	model := flags.String("model", getenvDefault("LOCAL_MODEL_NAME", defaultModel), "local model name")
 	think := flags.Bool("think", true, "hide model thinking output when true; show it when false")
 	trace := flags.Bool("trace", false, "write full agent trace logs to stderr")
+	traceJSONL := flags.String("trace-jsonl", "", "write structured JSONL trace events to this file")
 	debug := flags.Bool("debug", false, "write structured debug error details to stderr")
 	mode := flags.String("mode", string(agent.ModeChat), "agent mode: chat, plan, or strict-plan")
 	serveAddr := flags.String("serve", "", "serve a streaming HTTP proxy on this address, for example 127.0.0.1:8080")
@@ -86,11 +94,35 @@ func parseCLIOptions(args []string, output io.Writer) (cliOptions, error) {
 		model:       *model,
 		think:       *think,
 		trace:       *trace,
+		traceJSONL:  *traceJSONL,
 		debug:       *debug,
 		mode:        agent.Mode(*mode),
 		serveAddr:   *serveAddr,
 		initialArgs: flags.Args(),
 	}, nil
+}
+
+// buildTraceHooks 根据 CLI 配置创建 trace hooks，并在需要时打开 JSONL 文件 sink。
+func buildTraceHooks(options cliOptions, stderr io.Writer) (*tracing.TraceHooks, io.Closer, error) {
+	sinks := []tracing.TraceSink{
+		tracing.NewTraceLogger(options.trace, stderr),
+	}
+	if options.traceJSONL == "" {
+		return tracing.NewTraceHooks(tracing.NewMultiSink(sinks...)), closeFunc(func() error { return nil }), nil
+	}
+	file, err := os.Create(options.traceJSONL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create trace jsonl file: %w", err)
+	}
+	sinks = append(sinks, tracing.NewTraceJSONLLogger(true, file))
+	return tracing.NewTraceHooks(tracing.NewMultiSink(sinks...)), file, nil
+}
+
+type closeFunc func() error
+
+// Close 执行轻量 close 回调，用于统一返回 io.Closer。
+func (f closeFunc) Close() error {
+	return f()
 }
 
 // newCLIFlagSet 创建 CLI 参数解析器，并统一定制帮助信息的输出格式。
@@ -137,7 +169,7 @@ func getenvDefault(name string, fallback string) string {
 // exitWithError 统一处理入口层致命错误的日志输出和进程退出。
 func exitWithError(err error, debug bool) {
 	// main 是程序最外层，只负责把致命错误交给统一 reporter。
-	// 真正的发生节点应该由内部包 Wrap 标注，main 这里只代表错误传播到了入口。
+	// 真正的发生节点应由内部包 Wrap 标注，main 这里只代表错误传播到了入口。
 	reporter := apperrors.NewReporter(debug, os.Stderr)
 	reporter.Log(err)
 	reporter.Debug(err)

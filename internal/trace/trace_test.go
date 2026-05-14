@@ -1,8 +1,10 @@
 package trace
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"mini-agent-runtime/internal/ollama"
 )
@@ -104,6 +106,64 @@ func TestTraceLoggerIncludesFullModelRequestAndResponse(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("trace output = %q, want to contain %s", got, want)
 		}
+	}
+}
+
+// TestTraceHooksAttachRunAndStepContext 验证 trace hooks 会把运行上下文挂到所有派生事件上。
+func TestTraceHooksAttachRunAndStepContext(t *testing.T) {
+	sink := &recordingTraceSink{}
+	hooks := NewTraceHooks(sink).WithContext(TraceContext{
+		RunID:        "run-000001",
+		StepID:       "step-000002",
+		ParentStepID: "step-000001",
+	})
+
+	hooks.ToolResult(ToolResultTrace{Name: "calculator", Result: "437"})
+
+	if got, want := sink.events[0].RunID, "run-000001"; got != want {
+		t.Fatalf("run id = %q, want %q", got, want)
+	}
+	if got, want := sink.events[0].StepID, "step-000002"; got != want {
+		t.Fatalf("step id = %q, want %q", got, want)
+	}
+	if got, want := sink.events[0].ParentStepID, "step-000001"; got != want {
+		t.Fatalf("parent step id = %q, want %q", got, want)
+	}
+}
+
+// TestTraceJSONLLoggerWritesStructuredEvents 验证 JSONL trace sink 会输出可被逐行解析的结构化事件。
+func TestTraceJSONLLoggerWritesStructuredEvents(t *testing.T) {
+	var output strings.Builder
+	logger := NewTraceJSONLLoggerWithClock(true, &output, func() time.Time {
+		return time.Date(2026, 5, 14, 10, 30, 0, 0, time.UTC)
+	})
+
+	logger.Emit(TraceEvent{
+		Name:   TraceToolResult,
+		RunID:  "run-000001",
+		StepID: "step-000002",
+		Data:   ToolResultTrace{Name: "calculator", Result: "437"},
+	})
+
+	var event map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output.String())), &event); err != nil {
+		t.Fatalf("jsonl event is not valid json: %v", err)
+	}
+	if got, want := event["name"], string(TraceToolResult); got != want {
+		t.Fatalf("jsonl name = %q, want %q", got, want)
+	}
+	if got, want := event["run_id"], "run-000001"; got != want {
+		t.Fatalf("jsonl run_id = %q, want %q", got, want)
+	}
+	if got, want := event["step_id"], "step-000002"; got != want {
+		t.Fatalf("jsonl step_id = %q, want %q", got, want)
+	}
+	if got, want := event["timestamp"], "2026-05-14T10:30:00Z"; got != want {
+		t.Fatalf("jsonl timestamp = %q, want %q", got, want)
+	}
+	data := event["data"].(map[string]any)
+	if got, want := data["result"], "437"; got != want {
+		t.Fatalf("jsonl data result = %q, want %q", got, want)
 	}
 }
 
