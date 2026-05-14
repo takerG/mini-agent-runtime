@@ -6,7 +6,34 @@ import (
 )
 
 // Summarizer 定义摘要 memory 如何把旧摘要和新对话压缩成新摘要。
-type Summarizer func(existing string, turn Turn) string
+type Summarizer interface {
+	Summarize(ctx context.Context, existing string, turn Turn) (string, error)
+}
+
+// SummarizerFunc 允许普通函数作为摘要策略接入 SummaryMemory。
+type SummarizerFunc func(ctx context.Context, existing string, turn Turn) (string, error)
+
+// Summarize 调用函数形式的摘要策略。
+func (f SummarizerFunc) Summarize(ctx context.Context, existing string, turn Turn) (string, error) {
+	return f(ctx, existing, turn)
+}
+
+// LocalSummarizer 使用本地字符串策略生成摘要，适合作为离线 demo 和测试默认实现。
+type LocalSummarizer struct{}
+
+// NewLocalSummarizer 创建本地字符串摘要器。
+func NewLocalSummarizer() LocalSummarizer {
+	return LocalSummarizer{}
+}
+
+// Summarize 使用本地字符串追加方式更新摘要。
+func (LocalSummarizer) Summarize(_ context.Context, existing string, turn Turn) (string, error) {
+	line := "- User: " + turn.User + " | Assistant: " + turn.Assistant
+	if strings.TrimSpace(existing) == "" {
+		return line, nil
+	}
+	return existing + "\n" + line, nil
+}
 
 // SummaryMemoryOptions 配置摘要 memory 的 scope 和摘要函数。
 type SummaryMemoryOptions struct {
@@ -29,7 +56,7 @@ func NewSummaryMemory(options SummaryMemoryOptions) *SummaryMemory {
 	}
 	summarizer := options.Summarizer
 	if summarizer == nil {
-		summarizer = defaultSummarizer
+		summarizer = NewLocalSummarizer()
 	}
 	return &SummaryMemory{
 		scope:      scope,
@@ -49,7 +76,7 @@ func (m *SummaryMemory) Scope() Scope {
 }
 
 // AppendTurn 使用 summarizer 更新当前 scope 下的摘要。
-func (m *SummaryMemory) AppendTurn(_ context.Context, query Query, turn Turn) error {
+func (m *SummaryMemory) AppendTurn(ctx context.Context, query Query, turn Turn) error {
 	if m == nil {
 		return nil
 	}
@@ -57,7 +84,11 @@ func (m *SummaryMemory) AppendTurn(_ context.Context, query Query, turn Turn) er
 	if key == "" {
 		return nil
 	}
-	m.summaries[key] = strings.TrimSpace(m.summarizer(m.summaries[key], turn))
+	summary, err := m.summarizer.Summarize(ctx, m.summaries[key], turn)
+	if err != nil {
+		return err
+	}
+	m.summaries[key] = strings.TrimSpace(summary)
 	return nil
 }
 
@@ -76,13 +107,4 @@ func (m *SummaryMemory) ContextBlock(_ context.Context, query Query) (Block, boo
 		Scope:    m.scope,
 		Content:  summary,
 	}, true, nil
-}
-
-// defaultSummarizer 使用本地字符串压缩模拟摘要更新，未来可替换成模型摘要。
-func defaultSummarizer(existing string, turn Turn) string {
-	line := "- User: " + turn.User + " | Assistant: " + turn.Assistant
-	if strings.TrimSpace(existing) == "" {
-		return line
-	}
-	return existing + "\n" + line
 }

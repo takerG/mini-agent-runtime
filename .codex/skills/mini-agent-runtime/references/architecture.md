@@ -12,7 +12,7 @@
 - `internal/tools`：`Tool` interface、`ToolRegistry`、`ExecutionPolicy`、内置工具、参数解析和校验。
 - `internal/planner`：普通计划和 strict executable plan 的结构、解析、格式化。
 - `internal/executor`：Hybrid executor 和 strict executor，负责执行计划、收集 observations、生成最终回答；只消费 runtime 注入的共享依赖，不创建默认 registry、trace、reporter 或 tool policy。
-- `internal/memory`：memory scope、providers、manager、窗口记忆、摘要记忆、本地 DB session state。
+- `internal/memory`：memory scope、providers、manager、窗口记忆、摘要记忆、模型摘要器、本地 DB session state。
 - `internal/prompts`：系统 prompt 和 prompt 构造函数。
 - `internal/trace`：trace event、run/step context、hooks、multi sink、stderr logger、JSONL logger。
 - `internal/errors`：错误码、节点、调用链、模型友好格式、debug/operator 输出。
@@ -26,7 +26,7 @@
 - 调整 executor 依赖：优先扩展 `executor.Dependencies`，由 `Runtime` 或 CLI 注入，不在 `NewExecutor` / `NewStrictExecutor` 中补 runtime 层默认值。
 - 新增 lifecycle 节点：优先使用 `internal/lifecycle.Recorder` 记录 run/step/observation，再让 trace 复用同一组 run/step ID。
 - 新增 trace 输出：优先实现 `trace.TraceSink`，通过 `trace.NewMultiSink` 组合，不改业务流程。
-- 新增 memory 策略：在 `internal/memory` 新增 provider，通过 manager 组合，不增加用户启动参数。
+- 新增 memory 策略：在 `internal/memory` 新增 provider 或 summarizer，通过 manager 组合，不增加用户启动参数。
 - 调整单轮执行流程：保持 `internal/agent/turn.go` 作为统一收口，确保 CLI runner 和 direct runtime API 都经过同一套 run lifecycle 与 memory 写入。
 - 新增 planner/executor 能力：优先放在 `internal/planner` 和 `internal/executor`，让 `internal/agent` 只做编排。
 - 新增 prompt：放入 `internal/prompts`，避免 prompt 文本散落在 runtime 逻辑里。

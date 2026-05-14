@@ -37,6 +37,7 @@ const (
 	NodeMain          Node = "main"
 	NodeAgentLoop     Node = "agent.loop"
 	NodeAgentToolCall Node = "agent.tool_call"
+	NodeMemory        Node = "memory"
 	NodeModelClient   Node = "model.client"
 	NodeOllamaClient  Node = "ollama.client"
 	NodeOllamaStream  Node = "ollama.stream"

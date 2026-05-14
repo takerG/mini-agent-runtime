@@ -71,6 +71,7 @@
 - MUST 所有模式的单轮 memory 读写通过统一 turn lifecycle 协调，不允许 direct runtime API 绕开最终 memory 写入。
 - MUST memory 策略通过代码装配、切换或组合，不通过 CLI 参数暴露。
 - MUST 支持最近 N 轮窗口记忆、摘要 memory、DB session state 的本地内存模拟实现。
+- MUST 摘要 memory 支持真实模型摘要器，同时保留本地摘要器作为离线 demo 和测试默认实现。
 - SHOULD DB 或向量存储类能力先实现访问函数和接口边界，首版不访问外部数据库。
 
 ## 9. Trace Log

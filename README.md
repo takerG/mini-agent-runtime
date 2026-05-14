@@ -137,7 +137,7 @@ Memory read/write is part of the unified turn lifecycle. Planner modes read memo
 The first version includes:
 
 - `WindowMemory`: session memory for the most recent N completed turns.
-- `SummaryMemory`: user or session memory that maintains a rolling summary. The default summarizer is local and string-based; it can be replaced with a model summarizer later.
+- `SummaryMemory`: user or session memory that maintains a rolling summary. The default summarizer is local and string-based for offline demos, and `NewModelSummarizer` / `NewModelSummaryManager` can use the configured model client to generate real summaries.
 - `DBSessionStateMemory`: session state access functions backed by an in-memory map for now. It models future DB access without calling an external database.
 
 `MemoryManager` composes providers and exposes one `Context` read path plus one `AppendTurn` write path. The same manager is used by `chat`, `plan`, and `strict-plan` modes. Memory context is injected as a system message only when a provider has data.
