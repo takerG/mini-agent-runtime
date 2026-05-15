@@ -45,6 +45,7 @@
 - MUST 保留 `strict-plan` 模式作为 Strict Planner/Executor：Planner 输出可执行 JSON，Go 解析并直接执行工具，模型只负责最终总结。
 - MUST plan 类模式下向 CLI 展示完整过程，包括 `[plan]`、`[observation]` 和 `Agent:`。
 - MUST strict-plan 模式下避免让模型二次决定工具调用；工具执行权归 Go runtime。
+- MUST `plan` 和 `strict-plan` 可以共用最底层 turn lifecycle 收口，但 runner 入口和核心执行方法必须显式分开，不能通过同一个 planner runner `RunTurn` 隐藏两种模式的本质区别。
 - SHOULD 命名和架构清晰区分 planner、executor、runtime、model client、tools、lifecycle、trace、errors。
 
 ## 6. Run Lifecycle

@@ -55,18 +55,12 @@ type ChatRunner struct {
 
 // PlannerRunner 负责 Hybrid Planner/Executor 模式的单轮执行。
 type PlannerRunner struct {
-	planner *plannerModeRunner
+	runtime *Runtime
 }
 
 // StrictPlannerRunner 负责 Strict Planner/Executor 模式的单轮执行。
 type StrictPlannerRunner struct {
-	planner *plannerModeRunner
-}
-
-// plannerModeRunner 封装 planner 类模式共享的会话、memory 和最终 trace 收尾逻辑。
-type plannerModeRunner struct {
 	runtime *Runtime
-	mode    Mode
 }
 
 // NewModeRunner 根据 mode 创建对应 runner，让 CLI loop 不再关心具体模式分发细节。
@@ -85,22 +79,14 @@ func NewModeRunner(options RunnerOptions) (ModeRunner, error) {
 		}, nil
 	case ModePlan:
 		return &PlannerRunner{
-			planner: newPlannerModeRunner(deps, ModePlan),
+			runtime: deps.runtime(),
 		}, nil
 	case ModeStrictPlan:
 		return &StrictPlannerRunner{
-			planner: newPlannerModeRunner(deps, ModeStrictPlan),
+			runtime: deps.runtime(),
 		}, nil
 	default:
 		return nil, apperrors.New(apperrors.NodeAgentLoop, apperrors.CodeInvalidUserInput, fmt.Sprintf("unknown agent mode: %s", deps.Mode))
-	}
-}
-
-// newPlannerModeRunner 创建 planner 类模式共享 runner，并保留模式自身的 runtime 依赖。
-func newPlannerModeRunner(options RunnerOptions, mode Mode) *plannerModeRunner {
-	return &plannerModeRunner{
-		runtime: options.runtime(),
-		mode:    mode,
 	}
 }
 
@@ -173,36 +159,40 @@ func (r *ChatRunner) runChatTurn(ctx context.Context, session *Session, recorder
 
 // RunTurn 执行 Hybrid Planner/Executor 模式的一轮用户输入。
 func (r *PlannerRunner) RunTurn(ctx context.Context, session *Session, userMessage string) (TurnResult, error) {
-	return r.planner.runTurn(ctx, session, userMessage, r)
-}
-
-// ExecuteTurn 执行 Hybrid Planner/Executor 模式的核心单轮逻辑。
-func (r *PlannerRunner) ExecuteTurn(ctx context.Context, options turnExecutionOptions) (string, error) {
-	return r.planner.runtime.runPlannerExecutorTurn(ctx, options.UserMessage, options.Recorder)
-}
-
-// RunTurn 执行 Strict Planner/Executor 模式的一轮用户输入。
-func (r *StrictPlannerRunner) RunTurn(ctx context.Context, session *Session, userMessage string) (TurnResult, error) {
-	return r.planner.runTurn(ctx, session, userMessage, r)
-}
-
-// ExecuteTurn 执行 Strict Planner/Executor 模式的核心单轮逻辑。
-func (r *StrictPlannerRunner) ExecuteTurn(ctx context.Context, options turnExecutionOptions) (string, error) {
-	return r.planner.runtime.runStrictPlannerExecutorTurn(ctx, options.UserMessage, options.Recorder)
-}
-
-// runTurn 执行 planner 类模式共享的生命周期协调流程。
-func (r *plannerModeRunner) runTurn(ctx context.Context, session *Session, userMessage string, executor turnExecutor) (TurnResult, error) {
 	return runAgentTurn(ctx, turnCoordinatorOptions{
-		Mode:                 r.mode,
+		Mode:                 ModePlan,
 		Trace:                r.runtime.trace,
 		Lifecycle:            r.runtime.lifecycle,
 		Session:              session,
 		UserMessage:          userMessage,
 		Stdout:               r.runtime.stdout,
 		PrintTrailingNewline: true,
-		Executor:             executor,
+		Executor:             r,
 	})
+}
+
+// ExecuteTurn 执行 Hybrid Planner/Executor 模式的核心单轮逻辑。
+func (r *PlannerRunner) ExecuteTurn(ctx context.Context, options turnExecutionOptions) (string, error) {
+	return r.runtime.runPlannerExecutorTurn(ctx, options.UserMessage, options.Recorder)
+}
+
+// RunTurn 执行 Strict Planner/Executor 模式的一轮用户输入。
+func (r *StrictPlannerRunner) RunTurn(ctx context.Context, session *Session, userMessage string) (TurnResult, error) {
+	return runAgentTurn(ctx, turnCoordinatorOptions{
+		Mode:                 ModeStrictPlan,
+		Trace:                r.runtime.trace,
+		Lifecycle:            r.runtime.lifecycle,
+		Session:              session,
+		UserMessage:          userMessage,
+		Stdout:               r.runtime.stdout,
+		PrintTrailingNewline: true,
+		Executor:             r,
+	})
+}
+
+// ExecuteTurn 执行 Strict Planner/Executor 模式的核心单轮逻辑。
+func (r *StrictPlannerRunner) ExecuteTurn(ctx context.Context, options turnExecutionOptions) (string, error) {
+	return r.runtime.runStrictPlannerExecutorTurn(ctx, options.UserMessage, options.Recorder)
 }
 
 // executeToolCallForModel 执行模型请求的工具调用，并把工具错误格式化成模型可理解的 observation。

@@ -134,7 +134,7 @@ func TestSummaryMemoryUsesModelSummarizer(t *testing.T) {
 	if len(requests[0].Messages) != 2 {
 		t.Fatalf("messages = %#v, want system and user message", requests[0].Messages)
 	}
-	for _, want := range []string{"memory summarizer", "只输出更新后的摘要"} {
+	for _, want := range []string{"记忆摘要器", "只输出更新后的摘要"} {
 		if !strings.Contains(requests[0].Messages[0].Content, want) {
 			t.Fatalf("system prompt = %q, want substring %q", requests[0].Messages[0].Content, want)
 		}

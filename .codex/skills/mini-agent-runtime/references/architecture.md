@@ -27,7 +27,7 @@
 - 新增 lifecycle 节点：优先使用 `internal/lifecycle.Recorder` 记录 run/step/observation，再让 trace 复用同一组 run/step ID。
 - 新增 trace 输出：优先实现 `trace.TraceSink`，通过 `trace.NewMultiSink` 组合，不改业务流程。
 - 新增 memory 策略：在 `internal/memory` 新增 provider 或 summarizer，通过 manager 组合，不增加用户启动参数。
-- 调整单轮执行流程：保持 `internal/agent/turn.go` 作为统一收口，确保 CLI runner 和 direct runtime API 都经过同一套 run lifecycle 与 memory 写入；具体模式执行必须通过具名 executor 实现，不用匿名函数隐藏真实调用。
+- 调整单轮执行流程：保持 `internal/agent/turn.go` 作为统一收口，确保 CLI runner 和 direct runtime API 都经过同一套 run lifecycle 与 memory 写入；具体模式执行必须通过具名 executor 实现，不用匿名函数隐藏真实调用。`plan` 与 `strict-plan` 的 runner 入口保持分离，只共享 lifecycle 收口，不共享 planner 模式 `RunTurn`。
 - 新增 planner/executor 能力：优先放在 `internal/planner` 和 `internal/executor`，让 `internal/agent` 只做编排。
 - 新增 prompt：放入 `internal/prompts`，避免 prompt 文本散落在 runtime 逻辑里。
 - 新增错误类型：通过 `internal/errors` 扩展错误码和节点，保持模型友好错误格式稳定。
