@@ -13,25 +13,28 @@ import (
 type TraceEventName string
 
 const (
-	TraceRunStart        TraceEventName = "run_start"
-	TraceRunFinish       TraceEventName = "run_finish"
-	TraceStepStart       TraceEventName = "step_start"
-	TraceStepFinish      TraceEventName = "step_finish"
-	TraceObservation     TraceEventName = "observation"
-	TraceChatLoopStart   TraceEventName = "chat_loop_start"
-	TraceChatLoopExit    TraceEventName = "chat_loop_exit"
-	TraceTurnInput       TraceEventName = "turn_input"
-	TraceModelRequest    TraceEventName = "model_request"
-	TraceModelResponse   TraceEventName = "model_response"
-	TraceToolCall        TraceEventName = "tool_call"
-	TraceToolResult      TraceEventName = "tool_result"
-	TraceToolError       TraceEventName = "tool_error"
-	TracePlannerRequest  TraceEventName = "planner_request"
-	TracePlannerResponse TraceEventName = "planner_response"
-	TraceExecutorStart   TraceEventName = "executor_start"
-	TraceExecutorStep    TraceEventName = "executor_step"
-	TraceExecutorFinish  TraceEventName = "executor_finish"
-	TraceFinalAnswer     TraceEventName = "final_answer"
+	TraceRunStart          TraceEventName = "run_start"
+	TraceRunFinish         TraceEventName = "run_finish"
+	TraceStepStart         TraceEventName = "step_start"
+	TraceStepFinish        TraceEventName = "step_finish"
+	TraceObservation       TraceEventName = "observation"
+	TraceChatLoopStart     TraceEventName = "chat_loop_start"
+	TraceChatLoopExit      TraceEventName = "chat_loop_exit"
+	TraceTurnInput         TraceEventName = "turn_input"
+	TraceModelRequest      TraceEventName = "model_request"
+	TraceModelResponse     TraceEventName = "model_response"
+	TraceToolCall          TraceEventName = "tool_call"
+	TraceToolResult        TraceEventName = "tool_result"
+	TraceToolError         TraceEventName = "tool_error"
+	TraceApprovalRequested TraceEventName = "approval_requested"
+	TraceApprovalDecided   TraceEventName = "approval_decided"
+	TraceApprovalBypassed  TraceEventName = "approval_bypassed"
+	TracePlannerRequest    TraceEventName = "planner_request"
+	TracePlannerResponse   TraceEventName = "planner_response"
+	TraceExecutorStart     TraceEventName = "executor_start"
+	TraceExecutorStep      TraceEventName = "executor_step"
+	TraceExecutorFinish    TraceEventName = "executor_finish"
+	TraceFinalAnswer       TraceEventName = "final_answer"
 )
 
 // TraceContext 表示 trace 事件所属的 run、step 和父 step 关联信息。
@@ -176,6 +179,32 @@ type ToolErrorTrace struct {
 	Error error  `json:"error"`
 }
 
+// ApprovalRequestedTrace 表示高风险工具调用提交审批时的 trace 信息。
+type ApprovalRequestedTrace struct {
+	RequestID string `json:"request_id"`
+	ToolName  string `json:"tool_name"`
+	RiskLevel string `json:"risk_level"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// ApprovalDecidedTrace 表示审批请求得到决策后的 trace 信息。
+type ApprovalDecidedTrace struct {
+	RequestID string `json:"request_id"`
+	ToolName  string `json:"tool_name"`
+	RiskLevel string `json:"risk_level"`
+	Decision  string `json:"decision"`
+	Approver  string `json:"approver,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// ApprovalBypassedTrace 表示工具调用不需要审批时的 trace 信息。
+type ApprovalBypassedTrace struct {
+	RequestID string `json:"request_id"`
+	ToolName  string `json:"tool_name"`
+	RiskLevel string `json:"risk_level"`
+	Reason    string `json:"reason,omitempty"`
+}
+
 // PlannerRequestTrace 表示 planner 阶段收到的用户目标。
 type PlannerRequestTrace struct {
 	Message      string `json:"message"`
@@ -274,6 +303,21 @@ func (h *TraceHooks) ToolResult(data ToolResultTrace) {
 // ToolError 记录工具调用失败事件。
 func (h *TraceHooks) ToolError(data ToolErrorTrace) {
 	h.emit(TraceToolError, data)
+}
+
+// ApprovalRequested 记录高风险工具调用提交审批事件。
+func (h *TraceHooks) ApprovalRequested(data ApprovalRequestedTrace) {
+	h.emit(TraceApprovalRequested, data)
+}
+
+// ApprovalDecided 记录审批请求得到决策事件。
+func (h *TraceHooks) ApprovalDecided(data ApprovalDecidedTrace) {
+	h.emit(TraceApprovalDecided, data)
+}
+
+// ApprovalBypassed 记录工具调用不需要审批事件。
+func (h *TraceHooks) ApprovalBypassed(data ApprovalBypassedTrace) {
+	h.emit(TraceApprovalBypassed, data)
 }
 
 // PlannerRequest 记录 planner 阶段收到的用户目标事件。
@@ -445,6 +489,12 @@ func formatTraceData(data any) string {
 		return fmt.Sprintf("name=%s result=%s", value.Name, value.Result)
 	case ToolErrorTrace:
 		return fmt.Sprintf("name=%s error=%v", value.Name, value.Error)
+	case ApprovalRequestedTrace:
+		return fmt.Sprintf("request_id=%s tool=%s risk=%s reason=%q", value.RequestID, value.ToolName, value.RiskLevel, value.Reason)
+	case ApprovalDecidedTrace:
+		return fmt.Sprintf("request_id=%s tool=%s risk=%s decision=%s approver=%s reason=%q", value.RequestID, value.ToolName, value.RiskLevel, value.Decision, value.Approver, value.Reason)
+	case ApprovalBypassedTrace:
+		return fmt.Sprintf("request_id=%s tool=%s risk=%s reason=%q", value.RequestID, value.ToolName, value.RiskLevel, value.Reason)
 	case PlannerRequestTrace:
 		return fmt.Sprintf("message=%q message_chars=%d", value.Message, value.MessageChars)
 	case PlannerResponseTrace:

@@ -283,14 +283,14 @@ func TestRunChatLoopSendsToolDefinitions(t *testing.T) {
 		t.Fatalf("RunChatLoop returned error: %v", err)
 	}
 
-	if got, want := len(request.Tools), 2; got != want {
+	if got, want := len(request.Tools), 3; got != want {
 		t.Fatalf("tool count = %d, want %d", got, want)
 	}
 	toolNames := map[string]bool{}
 	for _, tool := range request.Tools {
 		toolNames[tool.Function.Name] = true
 	}
-	for _, want := range []string{"current_time", "calculator"} {
+	for _, want := range []string{"current_time", "calculator", "dangerous_operation"} {
 		if !toolNames[want] {
 			t.Fatalf("tool names = %v, want %q", toolNames, want)
 		}
@@ -706,7 +706,7 @@ func TestRunChatLoopPlannerExecutorModePlansThenExecutesWithTools(t *testing.T) 
 	if got, want := len(requests[0].Tools), 0; got != want {
 		t.Fatalf("planner request tool count = %d, want %d", got, want)
 	}
-	if got, want := len(requests[1].Tools), 2; got != want {
+	if got, want := len(requests[1].Tools), 3; got != want {
 		t.Fatalf("executor request tool count = %d, want %d", got, want)
 	}
 	if !strings.Contains(requests[1].Messages[0].Content, "calculate 23*19") {
@@ -784,7 +784,7 @@ func TestRunChatLoopStrictPlannerExecutorModeExecutesToolsInGo(t *testing.T) {
 	if got, want := len(requests), 2; got != want {
 		t.Fatalf("request count = %d, want %d", got, want)
 	}
-	if got, want := len(requests[0].Tools), 2; got != want {
+	if got, want := len(requests[0].Tools), 3; got != want {
 		t.Fatalf("planner request tool count = %d, want %d", got, want)
 	}
 	if got, want := len(requests[1].Tools), 0; got != want {
@@ -999,7 +999,7 @@ func TestRuntimeRunsStrictPlannerExecutorTurnWithoutModelToolCalls(t *testing.T)
 	if got, want := len(requests), 2; got != want {
 		t.Fatalf("request count = %d, want %d", got, want)
 	}
-	if got, want := len(requests[0].Tools), 2; got != want {
+	if got, want := len(requests[0].Tools), 3; got != want {
 		t.Fatalf("strict planner request tool count = %d, want %d", got, want)
 	}
 	if got, want := len(requests[1].Tools), 0; got != want {

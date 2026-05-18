@@ -101,6 +101,27 @@ Mode comparison:
 
 The default mode is `chat`, which preserves the original direct native tool-calling behavior.
 
+## Agent Evals
+
+Run a JSON eval suite to exercise one or more agent modes and automatically check tool calls, structured tool results, lifecycle observations, final answers, and error behavior:
+
+```powershell
+go run . --eval docs/evals/basic.json
+```
+
+Eval files live under `docs/evals/`. A suite contains cases with an `input`, one `mode` or multiple `modes`, and an `expect` block. When neither `mode` nor `modes` is provided, the case runs against `chat`, `plan`, and `strict-plan`.
+
+Supported expectations include:
+
+- `tool_calls`: ordered expected tool calls, optionally with argument fragments.
+- `tool_call_count`: exact number of tool calls.
+- `tool_results`: ordered structured tool results observed through trace, with `result_contains` / `result_not_contains` checks.
+- `observations`: ordered lifecycle observations observed through trace; each expectation can match `type`, `name`, `content_contains`, `content_not_contains`, and `error_contains`.
+- `approval_requests` / `approval_decisions`: structured Human-in-the-loop checks observed through trace.
+- `answer_contains` / `answer_not_contains`: substring checks against the final assistant answer.
+- `expect_error` / `error_contains`: fatal error checks.
+- `tool_errors`: expected recoverable tool errors observed through trace.
+
 ## Agent Runtime Lifecycle
 
 Every user turn is now recorded as a `Run` with stable `run_id`, mode, input, status, timing, steps, observations, and final result. Model requests, planner calls, executor work, tool calls, observations, and summaries are represented as lifecycle steps.
@@ -111,10 +132,11 @@ Single-turn lifecycle coordination is centralized in `internal/agent/turn.go`. C
 
 ## Agent Tools
 
-The CLI sends two tool definitions to the model on every chat turn:
+The CLI sends the built-in tool definitions to the model on every chat turn:
 
 - `current_time`: returns the current local time.
 - `calculator`: runs basic `+`, `-`, `*`, `/` calculations.
+- `dangerous_operation`: simulates a high-risk action for Human-in-the-loop demos.
 
 When the model decides a question needs a tool, the app executes the Go function, appends the tool result to the conversation history, and asks the model again for the final answer.
 
@@ -122,7 +144,14 @@ If a tool does not exist or returns an error, the CLI does not exit immediately.
 
 Tools are managed through `ToolRegistry` in `internal/tools`. To add a new tool, implement the `Tool` interface with `Name()`, `Description()`, `Definition()`, and `Execute(ctx, args)`, then register the tool instance in `NewDefaultToolRegistry`.
 
-Tool execution can be governed by `ExecutionPolicy`, including timeout, retry, and allow/deny checks. The default policy is still simple: one attempt, no timeout, no retry.
+Tool execution can be governed by `ExecutionPolicy`, including timeout, retry, allow/deny checks, and Human-in-the-loop approval. Approval is owned by `internal/approval`: tools only declare a `RiskProfile`, while the runtime decides whether to bypass, request approval, deny, expire, or execute.
+
+High-risk tools implement `RiskAwareTool` and return a profile with `RiskLevelHigh` or `RiskLevelCritical`. `ExecuteWithPolicy` creates an approval request before real execution. In CLI mode, the default `approval.ConsoleGate` prompts on stderr. Input `yes`, `y`, `confirm`, or `确认` to execute. Any other input refuses the action and returns a structured tool error observation to the model. The built-in `dangerous_operation` tool only returns a `【高危操作】` marker after approval, so it is safe for demos.
+
+Approval activity is observable through trace and lifecycle:
+
+- trace events: `approval_requested`, `approval_decided`, `approval_bypassed`.
+- lifecycle observations: `approval_request`, `approval_decision`.
 
 The CLI wiring also supports dependency injection through `ChatLoopDependencies`, so tests or future runtimes can provide a custom `ToolRegistry`, tool policy, memory manager, lifecycle factory, trace hooks, or error reporter without changing the CLI loop.
 
@@ -186,6 +215,8 @@ The entrypoint is intentionally thin:
 
 - `main.go`: parses flags, chooses CLI or HTTP server mode, wires components together.
 - `internal/agent`: owns the multi-turn CLI loop, `Session` history/memory state, mode runners, runtime dependency wiring, and tool error feedback.
+- `internal/approval`: owns Human-in-the-loop request/decision types, risk policy, console gate, auto gate, and lifecycle/trace audit integration.
+- `internal/eval`: owns JSON eval suite loading, mode execution, trace-based behavior checks, and CLI eval reporting.
 - `internal/model`: owns shared model invocation, request/response trace events, HTTP status handling, and stream capture.
 - `internal/lifecycle`: owns run, step, observation, result records, and lifecycle recording helpers.
 - `internal/memory`: owns memory providers, user/session scope separation, memory composition, and local simulated session state.

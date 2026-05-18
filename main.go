@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 
 	"mini-agent-runtime/internal/agent"
 	apperrors "mini-agent-runtime/internal/errors"
+	evalrunner "mini-agent-runtime/internal/eval"
 	"mini-agent-runtime/internal/server"
 	tracing "mini-agent-runtime/internal/trace"
 )
@@ -26,6 +28,7 @@ type cliOptions struct {
 	debug       bool
 	mode        agent.Mode
 	serveAddr   string
+	evalPath    string
 	initialArgs []string
 }
 
@@ -47,6 +50,13 @@ func main() {
 	if options.serveAddr != "" {
 		handler := server.NewChatProxyHandler(options.endpoint, options.model, http.DefaultClient)
 		if err := newHTTPServer(options.serveAddr, handler).ListenAndServe(); err != nil {
+			exitWithError(err, options.debug)
+		}
+		return
+	}
+
+	if options.evalPath != "" {
+		if err := runEval(options); err != nil {
 			exitWithError(err, options.debug)
 		}
 		return
@@ -89,8 +99,12 @@ func parseCLIOptions(args []string, output io.Writer) (cliOptions, error) {
 	debug := flags.Bool("debug", false, "write structured debug error details to stderr")
 	mode := flags.String("mode", string(agent.ModeChat), "agent mode: chat, plan, or strict-plan")
 	serveAddr := flags.String("serve", "", "serve a streaming HTTP proxy on this address, for example 127.0.0.1:8080")
+	evalPath := flags.String("eval", "", "run eval suite from JSON file, for example docs/evals/basic.json")
 	if err := flags.Parse(args); err != nil {
 		return cliOptions{}, err
+	}
+	if *evalPath != "" && *serveAddr != "" {
+		return cliOptions{}, fmt.Errorf("--eval cannot be used with --serve")
 	}
 	return cliOptions{
 		endpoint:    *endpoint,
@@ -101,24 +115,63 @@ func parseCLIOptions(args []string, output io.Writer) (cliOptions, error) {
 		debug:       *debug,
 		mode:        agent.Mode(*mode),
 		serveAddr:   *serveAddr,
+		evalPath:    *evalPath,
 		initialArgs: flags.Args(),
 	}, nil
 }
 
+// runEval 读取 eval suite 并运行所有用例，失败用例会转换为 CLI 错误。
+func runEval(options cliOptions) error {
+	suite, err := evalrunner.LoadSuite(options.evalPath)
+	if err != nil {
+		return err
+	}
+	traceSinks, traceCloser, err := buildTraceSinks(options, os.Stderr)
+	if err != nil {
+		return err
+	}
+	report, err := evalrunner.NewRunner(evalrunner.RunnerOptions{
+		Endpoint:   options.endpoint,
+		Model:      options.model,
+		Think:      options.think,
+		Client:     http.DefaultClient,
+		Output:     os.Stderr,
+		TraceSinks: traceSinks,
+	}).RunSuite(context.Background(), suite)
+	closeErr := traceCloser.Close()
+	if err != nil {
+		return err
+	}
+	report.WriteText(os.Stdout)
+	if closeErr != nil {
+		return fmt.Errorf("close trace sink: %w", closeErr)
+	}
+	return report.FailureError()
+}
+
 // buildTraceHooks 根据 CLI 配置创建 trace hooks，并在需要时打开 JSONL 文件 sink。
 func buildTraceHooks(options cliOptions, stderr io.Writer) (*tracing.TraceHooks, io.Closer, error) {
+	sinks, closer, err := buildTraceSinks(options, stderr)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tracing.NewTraceHooks(tracing.NewMultiSink(sinks...)), closer, nil
+}
+
+// buildTraceSinks 根据 CLI 配置创建可复用的 trace sink 列表。
+func buildTraceSinks(options cliOptions, stderr io.Writer) ([]tracing.TraceSink, io.Closer, error) {
 	sinks := []tracing.TraceSink{
 		tracing.NewTraceLogger(options.trace, stderr),
 	}
 	if options.traceJSONL == "" {
-		return tracing.NewTraceHooks(tracing.NewMultiSink(sinks...)), closeFunc(func() error { return nil }), nil
+		return sinks, closeFunc(func() error { return nil }), nil
 	}
 	file, err := os.Create(options.traceJSONL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create trace jsonl file: %w", err)
 	}
 	sinks = append(sinks, tracing.NewTraceJSONLLogger(true, file))
-	return tracing.NewTraceHooks(tracing.NewMultiSink(sinks...)), file, nil
+	return sinks, file, nil
 }
 
 type closeFunc func() error

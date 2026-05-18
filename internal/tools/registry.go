@@ -61,5 +61,6 @@ func NewDefaultToolRegistry(now func() time.Time) *ToolRegistry {
 	registry := NewToolRegistry()
 	registry.Register(NewCurrentTimeTool(now))
 	registry.Register(NewCalculatorTool())
+	registry.Register(NewDangerousOperationTool())
 	return registry
 }

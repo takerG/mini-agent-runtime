@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"mini-agent-runtime/internal/approval"
 	apperrors "mini-agent-runtime/internal/errors"
 	"mini-agent-runtime/internal/lifecycle"
 	"mini-agent-runtime/internal/ollama"
@@ -58,7 +59,7 @@ func (e *StrictExecutor) Execute(ctx context.Context, plan planner.ExecutablePla
 	for _, step := range plan.Steps {
 		lifecycleStep, stepTrace := e.startStep(lifecycle.StepTypeToolCall, step.ToolName, step.Arguments)
 		stepTrace.ToolCall(tracing.ToolCallTrace{Name: step.ToolName, Arguments: step.Arguments})
-		result, err := e.executeToolCall(ctx, step)
+		result, err := e.executeToolCall(ctx, step, stepTrace, lifecycleStep)
 		if err != nil {
 			err = apperrors.Wrap(apperrors.NodeAgentToolCall, apperrors.CodeToolExecutionFailed, err, "strict executor tool call failed")
 			stepTrace.ToolError(tracing.ToolErrorTrace{Name: step.ToolName, Error: err})
@@ -81,7 +82,7 @@ func (e *StrictExecutor) Execute(ctx context.Context, plan planner.ExecutablePla
 }
 
 // executeToolCall 执行 strict planner 中的单个工具步骤，并在 registry 缺失时返回配置错误。
-func (e *StrictExecutor) executeToolCall(ctx context.Context, step planner.ExecutableStep) (string, error) {
+func (e *StrictExecutor) executeToolCall(ctx context.Context, step planner.ExecutableStep, traceHooks *tracing.TraceHooks, lifecycleStep lifecycle.Step) (string, error) {
 	if e.registry == nil {
 		return "", missingRegistryError("strict executor")
 	}
@@ -90,7 +91,19 @@ func (e *StrictExecutor) executeToolCall(ctx context.Context, step planner.Execu
 			Name:      step.ToolName,
 			Arguments: step.Arguments,
 		},
-	}, e.toolPolicy)
+	}, e.approvalPolicyForCurrentStep(traceHooks, lifecycleStep))
+}
+
+// approvalPolicyForCurrentStep 把 strict executor 当前 tool step 的上下文注入审批策略。
+func (e *StrictExecutor) approvalPolicyForCurrentStep(traceHooks *tracing.TraceHooks, step lifecycle.Step) tools.ExecutionPolicy {
+	policy := e.toolPolicy
+	policy.Approval.Context = approval.RuntimeContext{
+		RunID:        e.recorder.RunID(),
+		StepID:       step.ID,
+		ParentStepID: step.ParentID,
+	}
+	policy.Approval.Recorder = approval.NewLifecycleRecorder(traceHooks, e.recorder, step)
+	return policy
 }
 
 // startStep 在 strict executor 内部创建可观测 step，并返回带 step 上下文的 trace hooks。

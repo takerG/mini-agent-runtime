@@ -3,12 +3,14 @@ package agent
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"mini-agent-runtime/internal/approval"
 	apperrors "mini-agent-runtime/internal/errors"
 	"mini-agent-runtime/internal/lifecycle"
 	"mini-agent-runtime/internal/memory"
@@ -91,7 +93,11 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 	if options.Stderr == nil {
 		options.Stderr = io.Discard
 	}
+	input := newLineInput(options.Stdin)
 	dependencies := normalizeChatLoopDependencies(options.Dependencies, options.Trace, options.Memory, options.Debug, options.Stderr)
+	if dependencies.ToolPolicy.Approval.Gate == nil {
+		dependencies.ToolPolicy.Approval.Gate = approval.NewConsoleGate(input, options.Stderr)
+	}
 	traceHooks := dependencies.Trace
 	toolRegistry := dependencies.Tools
 	memoryManager := dependencies.Memory
@@ -128,19 +134,19 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 	})
 
 	ctx := context.Background()
-	scanner := bufio.NewScanner(options.Stdin)
 	pending := strings.TrimSpace(strings.Join(options.InitialArgs, " "))
 
 	for {
 		if pending == "" {
 			_, _ = fmt.Fprint(options.Stderr, "You: ")
-			if !scanner.Scan() {
-				if err := scanner.Err(); err != nil {
-					return apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeInvalidUserInput, err, "read message")
-				}
+			line, err := input.ReadLine(ctx)
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
-			pending = strings.TrimSpace(scanner.Text())
+			if err != nil {
+				return apperrors.Wrap(apperrors.NodeAgentLoop, apperrors.CodeInvalidUserInput, err, "read message")
+			}
+			pending = strings.TrimSpace(line)
 		}
 
 		if isExitCommand(pending) {
@@ -156,6 +162,31 @@ func RunChatLoopWithOptions(options ChatLoopOptions) error {
 		}
 		pending = ""
 	}
+}
+
+// lineInput 封装 CLI 与人工审批共用的逐行输入读取器。
+type lineInput struct {
+	reader *bufio.Reader
+}
+
+// newLineInput 创建逐行输入读取器，nil 输入会被视为空输入。
+func newLineInput(reader io.Reader) *lineInput {
+	if reader == nil {
+		reader = strings.NewReader("")
+	}
+	return &lineInput{reader: bufio.NewReader(reader)}
+}
+
+// ReadLine 读取一行输入，并去掉行尾换行符。
+func (i *lineInput) ReadLine(_ context.Context) (string, error) {
+	line, err := i.reader.ReadString('\n')
+	if err != nil {
+		if errors.Is(err, io.EOF) && line != "" {
+			return strings.TrimRight(line, "\r\n"), nil
+		}
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
 }
 
 // normalizeChatLoopDependencies 合并显式依赖和旧版 options 字段，并为缺失依赖填充默认实现。

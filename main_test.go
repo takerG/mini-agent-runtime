@@ -58,6 +58,21 @@ func TestParseCLIOptionsAcceptsTraceJSONLFlag(t *testing.T) {
 	}
 }
 
+// TestParseCLIOptionsAcceptsEvalFlag 验证 CLI 可以解析 eval suite 路径。
+func TestParseCLIOptionsAcceptsEvalFlag(t *testing.T) {
+	var output strings.Builder
+
+	options, err := parseCLIOptions([]string{
+		"--eval", "docs/evals/basic.json",
+	}, &output)
+	if err != nil {
+		t.Fatalf("parseCLIOptions returned error: %v", err)
+	}
+	if got, want := options.evalPath, "docs/evals/basic.json"; got != want {
+		t.Fatalf("evalPath = %q, want %q", got, want)
+	}
+}
+
 // TestCLIUsageShowsDoubleDashFlags 验证帮助信息使用双横线展示参数名称。
 func TestCLIUsageShowsDoubleDashFlags(t *testing.T) {
 	var output strings.Builder
@@ -68,7 +83,7 @@ func TestCLIUsageShowsDoubleDashFlags(t *testing.T) {
 	}
 
 	got := output.String()
-	for _, want := range []string{"--mode", "--trace", "--trace-jsonl", "--model", "--think"} {
+	for _, want := range []string{"--mode", "--trace", "--trace-jsonl", "--model", "--think", "--eval"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("usage = %q, want to contain %s", got, want)
 		}

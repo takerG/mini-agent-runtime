@@ -131,6 +131,39 @@ func TestTraceHooksAttachRunAndStepContext(t *testing.T) {
 	}
 }
 
+// TestTraceHooksEmitApprovalEvents 验证 trace hooks 会输出审批请求和审批决策事件。
+func TestTraceHooksEmitApprovalEvents(t *testing.T) {
+	sink := &recordingTraceSink{}
+	hooks := NewTraceHooks(sink).WithContext(TraceContext{
+		RunID:  "run-000001",
+		StepID: "step-000002",
+	})
+
+	hooks.ApprovalRequested(ApprovalRequestedTrace{
+		RequestID: "approval-1",
+		ToolName:  "dangerous_operation",
+		RiskLevel: "high",
+		Reason:    "高危操作需要人工确认",
+	})
+	hooks.ApprovalDecided(ApprovalDecidedTrace{
+		RequestID: "approval-1",
+		ToolName:  "dangerous_operation",
+		RiskLevel: "high",
+		Decision:  "approved",
+		Approver:  "cli",
+	})
+
+	if got, want := len(sink.events), 2; got != want {
+		t.Fatalf("event count = %d, want %d", got, want)
+	}
+	if got, want := sink.events[0].Name, TraceApprovalRequested; got != want {
+		t.Fatalf("first event name = %q, want %q", got, want)
+	}
+	if got, want := sink.events[1].Name, TraceApprovalDecided; got != want {
+		t.Fatalf("second event name = %q, want %q", got, want)
+	}
+}
+
 // TestTraceJSONLLoggerWritesStructuredEvents 验证 JSONL trace sink 会输出可被逐行解析的结构化事件。
 func TestTraceJSONLLoggerWritesStructuredEvents(t *testing.T) {
 	var output strings.Builder

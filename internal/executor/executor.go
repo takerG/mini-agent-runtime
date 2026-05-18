@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"mini-agent-runtime/internal/approval"
 	apperrors "mini-agent-runtime/internal/errors"
 	"mini-agent-runtime/internal/lifecycle"
 	modelclient "mini-agent-runtime/internal/model"
@@ -125,7 +126,7 @@ func (e *Executor) Execute(ctx context.Context, userMessage string, plan planner
 		for _, call := range toolCalls {
 			toolStep, toolTrace := e.startStep(lifecycle.StepTypeToolCall, call.Function.Name, call.Function.Arguments)
 			toolTrace.ToolCall(tracing.ToolCallTrace{Name: call.Function.Name, Arguments: call.Function.Arguments})
-			result, toolErr := e.executeToolCall(ctx, call, toolTrace)
+			result, toolErr := e.executeToolCall(ctx, call, toolTrace, toolStep)
 			toolTrace.ToolResult(tracing.ToolResultTrace{Name: call.Function.Name, Result: result})
 			observationType := lifecycle.ObservationTypeToolResult
 			if toolErr != nil {
@@ -237,8 +238,8 @@ func formatToolArguments(args map[string]any) string {
 }
 
 // executeToolCall 执行单次工具调用，并把失败结果转换成模型可继续处理的文本。
-func (e *Executor) executeToolCall(ctx context.Context, call ollama.ToolCall, traceHooks *tracing.TraceHooks) (string, error) {
-	result, err := e.registry.ExecuteWithPolicy(ctx, call, e.toolPolicy)
+func (e *Executor) executeToolCall(ctx context.Context, call ollama.ToolCall, traceHooks *tracing.TraceHooks, step lifecycle.Step) (string, error) {
+	result, err := e.registry.ExecuteWithPolicy(ctx, call, e.approvalPolicyForCurrentStep(traceHooks, step))
 	if err != nil {
 		err = apperrors.Wrap(apperrors.NodeAgentToolCall, apperrors.CodeToolExecutionFailed, err, "executor tool call failed")
 		traceHooks.ToolError(tracing.ToolErrorTrace{Name: call.Function.Name, Error: err})
@@ -246,6 +247,18 @@ func (e *Executor) executeToolCall(ctx context.Context, call ollama.ToolCall, tr
 		return apperrors.FormatForModel(err), err
 	}
 	return result, nil
+}
+
+// approvalPolicyForCurrentStep 把 executor 当前 tool step 的上下文注入审批策略。
+func (e *Executor) approvalPolicyForCurrentStep(traceHooks *tracing.TraceHooks, step lifecycle.Step) tools.ExecutionPolicy {
+	policy := e.toolPolicy
+	policy.Approval.Context = approval.RuntimeContext{
+		RunID:        e.recorder.RunID(),
+		StepID:       step.ID,
+		ParentStepID: step.ParentID,
+	}
+	policy.Approval.Recorder = approval.NewLifecycleRecorder(traceHooks, e.recorder, step)
+	return policy
 }
 
 // startStep 在 executor 内部创建可观测 step，并返回带 step 上下文的 trace hooks。

@@ -29,11 +29,13 @@ const (
 type ObservationType string
 
 const (
-	ObservationTypeModelResponse ObservationType = "model_response"
-	ObservationTypeToolResult    ObservationType = "tool_result"
-	ObservationTypeToolError     ObservationType = "tool_error"
-	ObservationTypeMemoryContext ObservationType = "memory_context"
-	ObservationTypeFinalAnswer   ObservationType = "final_answer"
+	ObservationTypeModelResponse    ObservationType = "model_response"
+	ObservationTypeToolResult       ObservationType = "tool_result"
+	ObservationTypeToolError        ObservationType = "tool_error"
+	ObservationTypeApprovalRequest  ObservationType = "approval_request"
+	ObservationTypeApprovalDecision ObservationType = "approval_decision"
+	ObservationTypeMemoryContext    ObservationType = "memory_context"
+	ObservationTypeFinalAnswer      ObservationType = "final_answer"
 )
 
 // Clock 定义 lifecycle 使用的时间来源，便于测试中注入稳定时钟。

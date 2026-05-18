@@ -52,7 +52,7 @@
 
 - MUST 每次用户请求记录为一个 `Run`，包含 `run_id`、mode、input、status、时间、steps、observations 和最终 result。
 - MUST 模型请求、planner、executor、tool call、summary 等关键节点记录为 step。
-- MUST 工具结果、工具错误、模型返回、最终回答等关键数据记录为 observation。
+- MUST 工具结果、工具错误、模型返回、最终回答、Human-in-the-loop 审批请求和审批决策等关键数据记录为 observation。
 - MUST `chat`、`plan`、`strict-plan` 共用同一套 lifecycle 模型。
 - SHOULD trace 事件复用 lifecycle 的 run/step ID，便于 stderr、JSONL、未来 UI 或 replay 对齐。
 
@@ -63,9 +63,11 @@
 - MUST 默认通过 `registry.Execute(ctx, call)` 执行工具调用；需要治理时通过 `registry.ExecuteWithPolicy(ctx, call, policy)`。
 - MUST 禁止在 CLI 或 runtime 中回退到硬编码 `switch tool_name` 的分发方式。
 - MUST 每个 tool 使用独立 `.go` 文件，并使用工具名命名，例如 `calculator.go`、`current_time.go`。
-- MUST 默认注册内置工具 `calculator` 和 `current_time`。
+- MUST 默认注册内置工具 `calculator`、`current_time` 和用于 Human-in-the-loop 验收的 `dangerous_operation`。
 - MUST 当工具不存在或工具返回错误时，不直接退出 agent 对话，而是把结构化错误作为 observation 交给模型继续处理。
-- SHOULD 工具治理能力优先放入 `ExecutionPolicy`，包括 timeout、retry、allow/deny，为 human approval 预留扩展空间。
+- MUST Human-in-the-loop 能力由 `internal/approval` 统一承载，包含 `RiskProfile`、`Policy`、`Gate`、审批 request/decision 和审计记录。
+- MUST 高风险工具通过 `RiskAwareTool` 声明 `RiskProfile`，并由 `ExecuteWithPolicy` 在真实执行前统一请求 approval gate 确认；未确认、拒绝或过期时不得执行工具，只能返回结构化错误 observation。
+- SHOULD 工具治理能力优先放入 `ExecutionPolicy`，包括 timeout、retry、allow/deny 和 human approval。
 
 ## 8. Memory 系统
 
@@ -80,7 +82,7 @@
 
 - MUST 使用 hook/sink 形式的 trace 机制，不只依赖业务逻辑里零散手写日志。
 - MUST `--trace` 下完整展示每轮模型入参、模型返回内容和工具调用。
-- MUST trace 关键 agent 节点，包括用户输入、模型请求、模型响应、工具调用、工具结果、工具错误、planner、executor、最终回答。
+- MUST trace 关键 agent 节点，包括用户输入、模型请求、模型响应、工具调用、工具结果、工具错误、审批请求、审批决策、planner、executor、最终回答。
 - MUST trace 事件支持 run/step/parent_step 上下文。
 - SHOULD trace 输出写入 stderr，避免污染 stdout 中的模型流式回答。
 - SHOULD 支持 JSONL sink，事件可逐行 JSON.parse，用于复盘、面试展示、自动测试或未来 replay。
@@ -111,10 +113,12 @@
 - MUST `internal/lifecycle` 负责 run、step、observation、result 记录。
 - MUST `internal/model` 负责共享模型调用、HTTP 请求、trace 和响应捕获。
 - MUST `internal/ollama` 负责 Ollama 兼容协议类型、请求构造和流式解析。
+- MUST `internal/approval` 负责 Human-in-the-loop 请求、决策、风险画像、审批策略、CLI gate、auto gate 和 lifecycle/trace 审计适配。
 - MUST `internal/tools` 负责工具接口、注册表、执行策略、内置工具和参数校验。
 - MUST `internal/planner` 负责 planner 输出结构和解析。
 - MUST `internal/executor` 负责 Hybrid 和 Strict Planner/Executor 的执行阶段。
 - MUST `internal/executor` 只消费 runtime 注入的共享依赖，不创建默认 `ToolRegistry`、`TraceHooks`、`Reporter` 或 `ExecutionPolicy`。
+- MUST `internal/eval` 负责 JSON eval suite 加载、按 mode 执行用例、基于 trace 事件检查工具调用、工具结果、lifecycle observation、工具错误和最终答案，不解析 stdout 文本，不复制 agent 运行流程。
 - MUST `internal/memory` 负责 memory provider、scope、组合和本地模拟存储。
 - MUST `internal/prompts` 负责系统 prompt 和 prompt 构造。
 - MUST `internal/trace` 负责 trace 事件、run/step context、hooks 和 sink。

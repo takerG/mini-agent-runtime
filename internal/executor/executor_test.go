@@ -91,7 +91,7 @@ func TestExecutorRunsPlanWithNativeToolCalls(t *testing.T) {
 	if got, want := len(requests), 2; got != want {
 		t.Fatalf("request count = %d, want %d", got, want)
 	}
-	if got, want := len(requests[0].Tools), 2; got != want {
+	if got, want := len(requests[0].Tools), 3; got != want {
 		t.Fatalf("executor tool count = %d, want %d", got, want)
 	}
 	if !strings.Contains(requests[0].Messages[0].Content, "calculate 23*19") {

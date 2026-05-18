@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"mini-agent-runtime/internal/approval"
 	apperrors "mini-agent-runtime/internal/errors"
 	"mini-agent-runtime/internal/lifecycle"
 	"mini-agent-runtime/internal/memory"
@@ -144,7 +145,7 @@ func (r *ChatRunner) runChatTurn(ctx context.Context, session *Session, recorder
 		for _, call := range chatResult.ToolCalls {
 			toolStep, toolTrace := startLifecycleStep(r.trace, recorder, "", lifecycle.StepTypeToolCall, call.Function.Name, call.Function.Arguments)
 			toolTrace.ToolCall(tracing.ToolCallTrace{Name: call.Function.Name, Arguments: call.Function.Arguments})
-			toolResult, toolErr := executeToolCallForModel(ctx, r.tools, call, toolTrace, r.reporter, r.toolPolicy)
+			toolResult, toolErr := executeToolCallForModel(ctx, r.tools, call, toolTrace, r.reporter, approvalPolicyForStep(r.toolPolicy, toolTrace, recorder, toolStep))
 			toolTrace.ToolResult(tracing.ToolResultTrace{Name: call.Function.Name, Result: toolResult})
 			observationType := lifecycle.ObservationTypeToolResult
 			if toolErr != nil {
@@ -193,6 +194,17 @@ func (r *StrictPlannerRunner) RunTurn(ctx context.Context, session *Session, use
 // ExecuteTurn 执行 Strict Planner/Executor 模式的核心单轮逻辑。
 func (r *StrictPlannerRunner) ExecuteTurn(ctx context.Context, options turnExecutionOptions) (string, error) {
 	return r.runtime.runStrictPlannerExecutorTurn(ctx, options.UserMessage, options.Recorder)
+}
+
+// approvalPolicyForStep 把当前 tool step 的 run/step 上下文注入工具执行策略。
+func approvalPolicyForStep(policy tools.ExecutionPolicy, traceHooks *tracing.TraceHooks, recorder *lifecycle.Recorder, step lifecycle.Step) tools.ExecutionPolicy {
+	policy.Approval.Context = approval.RuntimeContext{
+		RunID:        recorder.RunID(),
+		StepID:       step.ID,
+		ParentStepID: step.ParentID,
+	}
+	policy.Approval.Recorder = approval.NewLifecycleRecorder(traceHooks, recorder, step)
+	return policy
 }
 
 // executeToolCallForModel 执行模型请求的工具调用，并把工具错误格式化成模型可理解的 observation。

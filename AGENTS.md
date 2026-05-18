@@ -20,9 +20,10 @@
 - 错误判断必须使用 `errors.Is` / `errors.As` 处理可能被 wrap 的错误；禁止用 `err == targetErr` 判断错误链。
 - 新增 goroutine 必须有明确退出条件；超时治理优先通过 `context.Context` 传递 deadline。
 - CLI 参数使用双横线形式，例如 `--mode`、`--trace`、`--trace-jsonl`、`--debug`、`--model`、`--think`。
-- 保持 `chat`、`plan`、`strict-plan` 三种模式的职责边界；不要把 planner、executor、runtime、model client、tools、lifecycle、trace、errors 混在一起。
+- 保持 `chat`、`plan`、`strict-plan` 三种模式的职责边界；不要把 planner、executor、runtime、model client、tools、approval、lifecycle、trace、errors 混在一起。
 - 每次用户请求都必须能落到统一的 run lifecycle：`Run`、`Step`、`Observation`、`Result`。
 - tools 必须通过 `Tool` interface 和 `ToolRegistry` 注册、定义、执行；禁止在 runtime 或 CLI 中回退到 `switch tool_name` 分发。
+- Human-in-the-loop 必须通过 `internal/approval` 和 `ExecutionPolicy` 统一治理；高风险工具只声明 `RiskProfile`，不得自行实现审批交互。
 - memory 必须区分 user memory 和 session memory，并通过代码组合或切换实现，不通过 CLI 参数暴露策略细节。
 - trace 必须通过 hook/sink 挂靠关键节点，并在 `--trace` 下展示每轮模型入参、模型返回、工具调用和 observation；JSONL trace 事件必须带上可关联的 run/step 上下文。
 - errors 包统一负责错误码、节点、格式化、日志和 `--debug` 输出。

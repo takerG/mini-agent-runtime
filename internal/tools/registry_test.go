@@ -100,7 +100,7 @@ func TestNewDefaultToolRegistryIncludesBuiltInTools(t *testing.T) {
 	})
 
 	definitions := registry.Definitions()
-	if got, want := len(definitions), 2; got != want {
+	if got, want := len(definitions), 3; got != want {
 		t.Fatalf("definition count = %d, want %d", got, want)
 	}
 
@@ -108,7 +108,7 @@ func TestNewDefaultToolRegistryIncludesBuiltInTools(t *testing.T) {
 	for _, definition := range definitions {
 		names[definition.Function.Name] = true
 	}
-	for _, want := range []string{"current_time", "calculator"} {
+	for _, want := range []string{"current_time", "calculator", "dangerous_operation"} {
 		if !names[want] {
 			t.Fatalf("registered tool names = %v, want %q", names, want)
 		}

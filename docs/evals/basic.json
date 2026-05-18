@@ -1,0 +1,53 @@
+{
+  "name": "basic",
+  "cases": [
+    {
+      "name": "calculator_across_modes",
+      "input": "请使用工具计算 23 * 19，并用一句话回答结果。",
+      "modes": ["chat", "plan", "strict-plan"],
+      "expect": {
+        "tool_calls": [
+          {
+            "name": "calculator",
+            "arguments": {
+              "op": "*"
+            }
+          }
+        ],
+        "tool_results": [
+          {
+            "name": "calculator",
+            "result_contains": ["437"]
+          }
+        ],
+        "observations": [
+          {
+            "type": "tool_result",
+            "name": "calculator",
+            "content_contains": ["437"]
+          }
+        ],
+        "answer_contains": ["437"]
+      }
+    },
+    {
+      "name": "current_time_strict_plan",
+      "input": "请调用工具获取当前时间，并用一句话回答。",
+      "mode": "strict-plan",
+      "expect": {
+        "tool_call_count": 1,
+        "tool_calls": [
+          {
+            "name": "current_time"
+          }
+        ],
+        "observations": [
+          {
+            "type": "tool_result",
+            "name": "current_time"
+          }
+        ]
+      }
+    }
+  ]
+}

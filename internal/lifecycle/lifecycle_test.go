@@ -43,6 +43,24 @@ func TestRecorderTracksRunStepsObservationsAndResult(t *testing.T) {
 	}
 }
 
+// TestRecorderTracksApprovalObservations 验证 lifecycle 可以记录审批请求和审批决策 observation。
+func TestRecorderTracksApprovalObservations(t *testing.T) {
+	factory := NewFactory(FactoryOptions{})
+	recorder := factory.Start("chat", "执行高危操作")
+	step := recorder.StartStep("", StepTypeToolCall, "dangerous_operation", nil)
+
+	recorder.AddObservation(step.ID, ObservationTypeApprovalRequest, "dangerous_operation", "approval requested", nil)
+	recorder.AddObservation(step.ID, ObservationTypeApprovalDecision, "dangerous_operation", "approval approved", nil)
+	run := recorder.Finish("已完成", nil)
+
+	if got, want := run.Steps[0].Observations[0].Type, ObservationTypeApprovalRequest; got != want {
+		t.Fatalf("first observation type = %q, want %q", got, want)
+	}
+	if got, want := run.Steps[0].Observations[1].Type, ObservationTypeApprovalDecision; got != want {
+		t.Fatalf("second observation type = %q, want %q", got, want)
+	}
+}
+
 // TestRecorderMarksFailures 验证 step 或 run 失败时会记录错误文本和失败状态。
 func TestRecorderMarksFailures(t *testing.T) {
 	factory := NewFactory(FactoryOptions{})

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"mini-agent-runtime/internal/approval"
 	apperrors "mini-agent-runtime/internal/errors"
 	"mini-agent-runtime/internal/ollama"
 )
@@ -22,12 +23,19 @@ type RetryPolicy interface {
 	Retryable(err error) bool
 }
 
+// RiskAwareTool 是工具可选实现的风险声明接口。
+type RiskAwareTool interface {
+	// RiskProfile 返回工具自身声明的风险画像。
+	RiskProfile() approval.RiskProfile
+}
+
 // ExecutionPolicy 描述工具调用的运行时治理策略。
 type ExecutionPolicy struct {
 	Timeout     time.Duration
 	MaxAttempts int
 	Allow       AllowPolicy
 	Retryable   RetryPolicy
+	Approval    approval.Policy
 }
 
 // DefaultExecutionPolicy 返回默认工具执行策略：单次执行、不超时、不自动重试。
@@ -47,6 +55,14 @@ func (r *ToolRegistry) ExecuteWithPolicy(ctx context.Context, call ollama.ToolCa
 		}
 	}
 	policy = normalizeExecutionPolicy(policy)
+	if _, err := policy.Approval.Review(ctx, approval.Evaluation{
+		ToolName:    tool.Name(),
+		Description: tool.Description(),
+		Arguments:   call.Function.Arguments,
+		RiskProfile: toolRiskProfile(tool),
+	}); err != nil {
+		return "", err
+	}
 
 	var lastErr error
 	for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
@@ -60,6 +76,15 @@ func (r *ToolRegistry) ExecuteWithPolicy(ctx context.Context, call ollama.ToolCa
 		}
 	}
 	return "", lastErr
+}
+
+// toolRiskProfile 返回工具声明的风险画像，未声明时默认认为是低风险。
+func toolRiskProfile(tool Tool) approval.RiskProfile {
+	riskAware, ok := tool.(RiskAwareTool)
+	if !ok {
+		return approval.RiskProfile{Level: approval.RiskLevelLow}
+	}
+	return riskAware.RiskProfile().Normalized()
 }
 
 // normalizeExecutionPolicy 补齐工具执行策略中的默认值。
